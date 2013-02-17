@@ -1,2 +1,5 @@
+sampler
+tags
 *.o
 *.swp
+*.*~

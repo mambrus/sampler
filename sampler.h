@@ -17,28 +17,5 @@
  *   Free Software Foundation, Inc.,                                       *
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
-#include <stdio.h>
-#include <limits.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <string.h>
-#include <pthread.h>
-#include <stdlib.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 
-#undef  NDEBUG
-#include <assert.h>
-
-#include "sampler.h"
-
-int main(int argc, char **argv) {
-	if (argc != 3) {
-		fprintf(stderr,"Need exactly two arguments, you gave %d\n",argc);
-		exit(1);
-	}
-
-	sampler_init(argv[1], atoi(argv[2]));
-	return 0;
-}
+int sampler_init(const char *filename, int n);
