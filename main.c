@@ -35,7 +35,7 @@
 
 int main(int argc, char **argv) {
 	if (argc != 3) {
-		fprintf(stderr,"Need exactly two arguments, you gave %d\n",argc);
+		fprintf(stderr,"Need exactly two arguments [%d]: regexp and sub-expr idx\n",argc);
 		exit(1);
 	}
 
