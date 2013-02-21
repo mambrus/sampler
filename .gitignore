@@ -1,4 +1,5 @@
 sampler
+files.s3
 tags
 *.o
 *.swp

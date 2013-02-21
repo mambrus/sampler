@@ -1,0 +1,174 @@
+#!/bin/bash
+# Author: Michael Ambrus (ambrmi09@gmail.com)
+# 2013-02-20
+
+if [ -z $SIGNAL_EDIT_SH ]; then
+
+SIGNAL_EDIT_SH="signal-edit.sh"
+
+#1 filename
+#2 index (needed due to dialog, usually 0)
+function file_to_vars() {
+	sname="$(pline_1 $1 $(( 1 + $2 )) )"
+	nfile="$(pline_1 $1 $(( 2 + $2 )) )"
+	dfile="$(pline_1 $1 $(( 3 + $2 )) )"
+	pers="$(pline_1  $1 $(( 4 + $2 )) )"
+	lpatt="$(pline_1 $1 $(( 5 + $2 )) )"
+	spatt="$(pline_1 $1 $(( 6 + $2 )) )"
+	indxs="$(pline_1 $1 $(( 7 + $2 )) )"
+}
+
+function sample-configurator.signal-edit() {
+
+	source futil.pline.sh
+	source futil.tmpname.sh
+	tmpname_flags_init "-a"
+
+	: ${DIALOG=dialog}
+	backtitle="Sample configurator - Signal definition"
+	xofs=23
+	xmax=0
+
+	if  [ -h $0 ]; then
+		#Running installed version.
+		PATH_PRFX="$(dirname $0)/sample-configurator."
+	else
+		PATH_PRFX="$(dirname $0)/"
+	fi
+
+	MAIN_HLP_FILE="${PATH_PRFX}signal-edit.hlp"
+
+	sname=""
+	nfile=""
+	dfile=""
+	pers=""
+	lpatt=""
+	spatt=""
+	indxs=""
+
+	if [ "X${INOUT_FILE}" != "X" ]; then
+		file_to_vars "${INOUT_FILE}" 0
+	fi
+
+	RC=0
+	while [ $RC -ne 1 ] && [ $RC -ne 250 ]; do
+
+		$DIALOG \
+			--begin 1 1 \
+			--ok-label "Submit" \
+			--backtitle "$backtitle" \
+			--title "Signal edit" \
+			--hfile "${MAIN_HLP_FILE}" \
+			--help-button \
+			--help-status \
+			--extra-button \
+			--extra-label "Abort" \
+			--form "Editing signal ID: ${SIGNAL_NUM}" \
+		0 0 0 \
+			"Name (symbolic):"         1 1	"$sname" 	1 $xofs 40 $xmax \
+			"Name (from filename):"    2 1	"$nfile"  	2 $xofs 80 $xmax \
+			"File:"                    3 1	"$dfile"  	3 $xofs 80 $xmax \
+			"Persistance:"             4 1	"$pers" 	4 $xofs 1 $xmax \
+			"Line pattern:"            5 1	"$lpatt" 	5 $xofs 80 $xmax \
+			"Signal pattern:"          6 1	"$spatt" 	6 $xofs 80 $xmax \
+			"Mach index(s):"           7 1	"$indxs" 	7 $xofs 20 $xmax \
+		2>$(tmpname)
+		RC=$?
+
+		VALUES=$(cat $(tmpname))
+
+		hindex=0
+		test $RC -eq 2 && (( hindex++ ))
+
+		file_to_vars "$(tmpname)" "$hindex"
+
+		case $RC in
+		1)
+			$DIALOG \
+				--clear \
+				--backtitle "$backtitle" \
+				--yesno "Really quit?" 10 30
+				case $? in
+				0)
+					break
+				;;
+			1)
+				RC=99
+				;;
+			esac
+			;;
+		0)
+			$DIALOG \
+				--clear \
+				--backtitle "$backtitle" --no-collapse --cr-wrap \
+				--msgbox "Resulting data:\n\
+$VALUES" 10 40
+			if [ "X${INOUT_FILE}" != "X" ]; then
+				cat $(tmpname) >  ${INOUT_FILE}
+			fi
+			#Only normal exit
+			exit 0
+			
+			;;
+		2)
+			#Button 2 (Help) pressed.
+			echo "Data" | $DIALOG \
+				--backtitle "$backtitle" \
+				--keep-window \
+				--no-collapse \
+				--cr-wrap \
+				--trim \
+				--title "Help - Signal edit" \
+				--textbox "${MAIN_HLP_FILE}" 20 80
+			;;
+		3)
+			$DIALOG \
+				--clear \
+				--backtitle "$backtitle" \
+				--title "Abort" \
+				--yesno "Really abort this signal edit?" 10 30
+				case $? in
+				0)
+					break
+				;;
+			1)
+				RC=99
+				;;
+			esac
+			;;
+		*)
+			echo "Return code was $RC"
+			exit
+			;;
+		esac
+	done
+
+	tmpname_cleanup
+
+	return $RC
+}
+
+source s3.ebasename.sh
+if [ "$SIGNAL_EDIT_SH" == $( ebasename $0 ) ]; then
+	#Not sourced, signal-edit something with this.
+
+	SAMPLER_SIGNAL_EDIT_SH_INFO=${SIGNAL_EDIT_SH}
+
+	source .sample-configurator.ui..signal-edit.sh
+
+	tty -s; ATTY="$?"
+	ISATTY="$ATTY -eq 0"
+
+	#set -e
+	#set -u
+
+
+	sample-configurator.signal-edit "$@"
+
+	RC=$?
+
+	exit $RC
+fi
+
+fi
+
