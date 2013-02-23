@@ -45,6 +45,7 @@ ifeq ($(HAS_GRCAT), yes)
 $(LOCAL_MODULE): Makefile $(LOCAL_SRC_FILESS:c=o)
 	@rm -f $(LOCAL_MODULE)
 	@( gcc -o$(LOCAL_MODULE) $(CFLAGS) $(LOCAL_SRC_FILESS:c=o) -lpthread 2>&1 ) | grcat conf.gcc
+	@echo $(LOCAL_MODULE) done...
 
 %.o: %.c Makefile
 	@( gcc -c $(CFLAGS) ${@:o=c} -o ${@} 2>&1 ) | grcat conf.gcc
@@ -54,6 +55,7 @@ else
 $(LOCAL_MODULE): Makefile $(LOCAL_SRC_FILESS:c=o)
 	@rm -f $(LOCAL_MODULE)
 	@gcc -o$(LOCAL_MODULE) $(CFLAGS) $(LOCAL_SRC_FILESS:c=o) -lpthread
+	@echo ">>>> Build $(LOCAL_MODULE) success! <<<<"
 
 %.o: %.c Makefile
 	@gcc -c $(CFLAGS) ${@:o=c} -o ${@}

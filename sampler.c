@@ -20,8 +20,82 @@
 #include <stdio.h>
 #include <regex.h>
 #include <string.h>
-#include <error.h>
 #include <stdlib.h>
+
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <time.h>
+
+// Test reading from sysfs to see what happens when/if EOF is reached.
+void test_fread_sysfs( void ) {
+	FILE *in;
+	char line[160];
+	memset(line,0,80); 
+	
+	//in=fopen("/sys/devices/system/cpu/cpu1/cpufreq/cpuinfo_cur_freq","r");
+	in=fopen("/dev/stdout","r");
+	//in=fopen("/dev/ttyUSB0","r");
+
+	if (in==NULL) {
+		perror("Something wrong with the file:");
+		exit(1);
+	}
+	while (!feof(in) && !ferror(in)) {
+		//fscanf(in,"%180c",line);
+		//fread(line,180,1,in);
+		fgets(line,180,in);
+		printf("%s",line);
+	}
+	printf("Finished reading?\n");
+}
+
+// Test reading from sysfs to see what happens when/if EOF is reached.
+void test_read_sysfs( void ) {
+	int in,rc=0;
+	char line[160];
+	memset(line,0,80);
+	struct stat tstat;
+	struct timespec *atim,*mtim,*ctim;
+	struct tm ttime;
+	//strftime
+	//asctime
+	//ctime
+	char *times;
+	struct timeval now;
+	
+	in=open("/sys/devices/system/cpu/cpu1/cpufreq/cpuinfo_cur_freq",O_RDONLY);
+	//in=open("/dev/ttyUSB0",O_RDONLY);
+
+	if (in<0) {
+		perror("Something wrong with the file:");
+		exit(1);
+	}
+	while (rc>=0) {
+		gettimeofday(now, NULL);
+		rc=fstat(in,&tstat);
+		if (rc<0) {
+			perror("Syscall fstat reurned error:");
+			exit(1);
+		} else {
+			atim=&(tstat.st_atim);
+			mtim=&(tstat.st_mtim);
+			ctim=&(tstat.st_ctim);
+			
+			times=ctime(&(atim->tv_sec));
+			//times=ctime(now.tv_sec);
+			printf("atime: %s",times);
+			times=ctime(&(mtim->tv_sec));
+			printf("mtime: %s",times);
+			times=ctime(&(ctim->tv_sec));
+			printf("ctime: %s",times);
+		}
+
+		rc=pread(in,line,160,0);
+		//read(in,line,160);
+		printf("%s %d \n",line,rc);
+	}
+}
 
 int sampler_init(const char *filename, int n) {
 	int rc;
@@ -31,6 +105,8 @@ int sampler_init(const char *filename, int n) {
 	char rstr[80];
 	regmatch_t mtch_idxs[80];
 	int so,eo;
+
+	test_read_sysfs();
 
 	memset(tstr,0,80); 
 	memset(estr,0,80); 
@@ -63,4 +139,7 @@ int sampler_init(const char *filename, int n) {
 	eo=mtch_idxs[n].rm_eo;
 	strncpy(rstr, &(tstr[so]), eo-so);
 	printf("Your embedded data is: %s\n", rstr);
+
+	//Dear gcc, shut up
+	return 1;
 }
