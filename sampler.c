@@ -26,6 +26,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <time.h>
+#include <errno.h>
 
 #include <assert.h>
 
@@ -33,6 +34,7 @@
 #include "sigstruct.h"
 
 #define TESTF( F ) (feof(F) || ferror(F))
+
 /* Compiled version of definition regex */
 regex_t preg;
 
@@ -118,7 +120,12 @@ static int parse_initfile(const char *fn) {
 				if ( line[0] != '#' && len>0 ) {
 					//Ignore lines starting with '#' and empty lines
 					//Can't handle "empty" lines with whites yet TBD
-					line[len-1]=0; //Get rid of the EOL. Not sure why needed.
+					
+					/* Line below: Get rid of the EOL. Not sure why this is
+					 * needed as REG_NOTEOL was not given to regexec.
+					 * Perhaps miss-understanding standard. Need check TBD
+					 * */
+					line[len-1]=0;
 					rc=parse_dfn_line(line, &tsig, lno);
 				} else {
 					//OK, just ignored
@@ -133,21 +140,28 @@ static int parse_initfile(const char *fn) {
 
 	if (rc!=0) {
 		if (ferror(fl)) {
-			perror("Signal description read error:");
-			return(rc);
+			perror("Signal description file read error:");
+			rc = EBADF;
+			goto fin_pars_init;
 		} else if (feof(fl)) {
 			fprintf(stderr,"Info: Scanned %d lines successfully\n",lno-1);
-			return(0);
+			rc = 0;
+			goto fin_pars_init;
 		} else {
 			fprintf(stderr,"Error: Scanned line %d is bad:\n",lno);
 			fprintf(stderr,":%s\n",line);
 			fprintf(stderr,":%s\n",DFN_LINE);
 
-			return(0);
+			rc = ENOEXEC;
+			goto fin_pars_init;
 		}
 	}
-
-	return(0);
+	
+	rc = ENOSYS;
+fin_pars_init:
+	
+	fclose(fl);
+	return(rc);
 } 
 
 int sampler_init(const char *siginitfn) {
@@ -168,12 +182,9 @@ int sampler_init(const char *siginitfn) {
 	/*TBD: Add better error-handling*/
 	assert(rc==0);
 
-	initfile=fopen(siginitfn,"r");
-	if (initfile==NULL) {
-		perror("Signal description file-error:");
-		exit(1);
-	}
+	regfree(&preg);
 
 	//Dear gcc, shut up
 	return 1;
 }
+

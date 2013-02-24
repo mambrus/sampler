@@ -1,11 +1,15 @@
 .PHONY: all clean install build
 
-CFLAGS=-O0 -g3
 LOCAL_MODULE := sampler
 LOCAL_SRC_FILESS := \
    main.c \
    sampler.c \
    list.c
+
+LOCAL_CFLAGS :=
+#LOCAL_CFLAGS := -DNDEBUG
+
+CFLAGS=-O0 -g3 ${LOCAL_CFLAGS}
 
 build: tags $(LOCAL_MODULE)
 all: install
