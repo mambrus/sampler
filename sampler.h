@@ -18,4 +18,12 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-int sampler_init(const char *filename, int n);
+/* Public interface of sampler-module  */
+
+#ifdef sampler_h
+#define sampler_h
+
+int sampler_init(const char *filename);
+
+#endif /* sampler_h */
+

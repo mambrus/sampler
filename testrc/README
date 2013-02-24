@@ -1,0 +1,5 @@
+Auto create files from the scripts like this:
+
+for F in scripts/sample-configurator/test/*sig; \
+	do (cat $F | awk '{printf("%s;",$0);}'); \
+	echo ; done | sed -e 's/;$//' > testrc/thermal_1.ini

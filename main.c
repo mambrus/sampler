@@ -34,11 +34,12 @@
 #include "sampler.h"
 
 int main(int argc, char **argv) {
-	if (argc != 3) {
-		fprintf(stderr,"Need exactly two arguments [%d]: regexp and sub-expr idx\n",argc);
+	if (argc != 2) {
+		fprintf(stderr,"Need exactly one argument [%d]: full path of signals description file\n",argc);
 		exit(1);
 	}
 
-	sampler_init(argv[1], atoi(argv[2]));
+	sampler_init(argv[1]);
+	//sampler_init(argv[1], atoi(argv[2]));
 	return 0;
 }

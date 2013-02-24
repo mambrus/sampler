@@ -27,118 +27,152 @@
 #include <unistd.h>
 #include <time.h>
 
-// Test reading from sysfs to see what happens when/if EOF is reached.
-void test_fread_sysfs( void ) {
-	FILE *in;
-	char line[160];
-	memset(line,0,80); 
-	
-	//in=fopen("/sys/devices/system/cpu/cpu1/cpufreq/cpuinfo_cur_freq","r");
-	in=fopen("/dev/stdout","r");
-	//in=fopen("/dev/ttyUSB0","r");
+#include <assert.h>
 
-	if (in==NULL) {
-		perror("Something wrong with the file:");
-		exit(1);
+/* Private definitions */
+#include "sigstruct.h"
+
+#define TESTF( F ) (feof(F) || ferror(F))
+/* Compiled version of definition regex */
+regex_t preg;
+
+/* How a definition line is expected to be formatted. Be very permissive,
+ * especially where regex strings go (#5, #6). Let client or any post
+ * process code figure out what's not right (i.e. strings instead of numbers
+ * eta.) */
+#define DFN_LINE "^\
+([[:alnum:] _/,]*);\
+([[:alnum:] _/,]*);\
+([[:alnum:] _/,]*);\
+([[:alnum:] _/,]*);\
+([[:print:]]*);\
+([[:print:]]*);\
+([[:alnum:] _/,]*)\
+$"
+
+/* Number of sub-expressions. NOTE: Very important to match this with
+ * DFN_LINE. If regex is written with more subexpressions than columns it
+ * has to be adjusted here */
+#define MAX_DFN_COLUMNS 7
+
+/* Max length of a definition input-line */
+#define MAX_DFN_LINE_LEN 1024
+
+/* Max length of a definition input-file. Just a number for sanity-checks
+ * really */
+#define MAX_DFN_LINES 1024
+
+/* Takes one line describing a sample-signal and make a signal scruct of it.
+ * Return 0 if all OK.*/
+static int parse_dfn_line(char *line, struct smpl_signal *rsig, int n) {
+	int rc,i;
+	char err_str[80]="\0"; /* Auto-fills with \0 */
+	/*Need to add +1 (extra) as index matches the whole pattern */
+	regmatch_t mtch_idxs[MAX_DFN_COLUMNS+1];
+
+	if (!rsig)
+		return -1;
+	if (n<0 || n>MAX_DFN_LINES)
+		return -2;
+
+	rc=regexec(&preg, line, MAX_DFN_COLUMNS+1, mtch_idxs, 0);
+	if (rc) {
+		regerror(rc, &preg, err_str, 80);
+		fprintf(stderr, "Regcomp faliure: %s\n", err_str);
+		return(rc);
 	}
-	while (!feof(in) && !ferror(in)) {
-		//fscanf(in,"%180c",line);
-		//fread(line,180,1,in);
-		fgets(line,180,in);
+	
+	/* Loop trough and put '\0' everywhere where pattern ends. Note that
+	 * index=0 matches the compete pattern. I.e. add +1 */
+	for (i=1; i<=MAX_DFN_COLUMNS; i++) {
+		line[mtch_idxs[i].rm_eo]=0;
+		printf("%02d: %s\n", i, &(line[mtch_idxs[i].rm_so]));
+		
+	}
+		
+	return 0;
+} 
+
+static int parse_initfile(const char *fn) {
+	FILE *fl;
+	int rc,lno=0;
+	char line[MAX_DFN_LINE_LEN],*rcs;
+	struct smpl_signal tsig;
+
+	fl=fopen(fn,"r");
+	if (fl==NULL) {
 		printf("%s",line);
-	}
-	printf("Finished reading?\n");
-}
-
-// Test reading from sysfs to see what happens when/if EOF is reached.
-void test_read_sysfs( void ) {
-	int in,rc=0;
-	char line[160];
-	memset(line,0,80);
-	struct stat tstat;
-	struct timespec *atim,*mtim,*ctim;
-	struct tm ttime;
-	//strftime
-	//asctime
-	//ctime
-	char *times;
-	struct timeval now;
-	
-	in=open("/sys/devices/system/cpu/cpu1/cpufreq/cpuinfo_cur_freq",O_RDONLY);
-	//in=open("/dev/ttyUSB0",O_RDONLY);
-
-	if (in<0) {
-		perror("Something wrong with the file:");
+		perror("Signal description file-error:");
 		exit(1);
 	}
-	while (rc>=0) {
-		gettimeofday(now, NULL);
-		rc=fstat(in,&tstat);
-		if (rc<0) {
-			perror("Syscall fstat reurned error:");
-			exit(1);
-		} else {
-			atim=&(tstat.st_atim);
-			mtim=&(tstat.st_mtim);
-			ctim=&(tstat.st_ctim);
-			
-			times=ctime(&(atim->tv_sec));
-			//times=ctime(now.tv_sec);
-			printf("atime: %s",times);
-			times=ctime(&(mtim->tv_sec));
-			printf("mtime: %s",times);
-			times=ctime(&(ctim->tv_sec));
-			printf("ctime: %s",times);
+	
+	for (
+		lno=0,rc=0;
+		rc==0; 
+		lno++
+	) {
+		rcs=fgets(line, MAX_DFN_LINE_LEN, fl);
+		if (rcs){
+			int len=strnlen(line, MAX_DFN_LINE_LEN);
+			if (len>0 && len<MAX_DFN_LINE_LEN) {
+				if ( line[0] != '#' && len>0 ) {
+					//Ignore lines starting with '#' and empty lines
+					//Can't handle "empty" lines with whites yet TBD
+					line[len-1]=0; //Get rid of the EOL. Not sure why needed.
+					rc=parse_dfn_line(line, &tsig, lno);
+				} else {
+					//OK, just ignored
+					rc=0;
+				}
+			}
 		}
 
-		rc=pread(in,line,160,0);
-		//read(in,line,160);
-		printf("%s %d \n",line,rc);
+		if (!rc)
+			rc=TESTF(fl);
 	}
-}
 
-int sampler_init(const char *filename, int n) {
+	if (rc!=0) {
+		if (ferror(fl)) {
+			perror("Signal description read error:");
+			return(rc);
+		} else if (feof(fl)) {
+			fprintf(stderr,"Info: Scanned %d lines successfully\n",lno-1);
+			return(0);
+		} else {
+			fprintf(stderr,"Error: Scanned line %d is bad:\n",lno);
+			fprintf(stderr,":%s\n",line);
+			fprintf(stderr,":%s\n",DFN_LINE);
+
+			return(0);
+		}
+	}
+
+	return(0);
+} 
+
+int sampler_init(const char *siginitfn) {
 	int rc;
-	regex_t preg;
-	char tstr[80];
-	char estr[80];
-	char rstr[80];
-	regmatch_t mtch_idxs[80];
-	int so,eo;
+	char err_str[80];
+	FILE *initfile;
 
-	test_read_sysfs();
-
-	memset(tstr,0,80); 
-	memset(estr,0,80); 
-	memset(rstr,0,80); 
-/*
-	rc=regcomp(&preg, "\\(.*\\)",
-		REG_EXTENDED);
-*/	
-	rc=regcomp(&preg, filename,
-		REG_EXTENDED);
+	memset(err_str,0,80); 
+	rc=regcomp(&preg, DFN_LINE, REG_EXTENDED);
 	if (rc) {
-		regerror(rc, &preg, estr, 80);
-		fprintf(stderr, "Regcomp faliure: %s\n", estr);
+		regerror(rc, &preg, err_str, 80);
+		fprintf(stderr, "Regcomp faliure("__FILE__":%d): %s\n", 
+			__LINE__, err_str);
 		exit(1);
 	}
-	scanf("%80c\n",tstr);
-	printf("You entered: %s\n",tstr);
-	/*
-	int regexec(const regex_t *preg, const char *string, size_t nmatch,
-					regmatch_t pmatch[], int eflags);
-	*/
-	rc=regexec(&preg, tstr, 80,
-					mtch_idxs, /*REG_NOTBOL|REG_NOTEOL*/ 0);
-	if (rc) {
-		regerror(rc, &preg, estr, 80);
-		fprintf(stderr, "Regcomp faliure: %s\n", estr);
+	
+	rc=parse_initfile(siginitfn); 
+	/*TBD: Add better error-handling*/
+	assert(rc==0);
+
+	initfile=fopen(siginitfn,"r");
+	if (initfile==NULL) {
+		perror("Signal description file-error:");
 		exit(1);
 	}
-	so=mtch_idxs[n].rm_so;
-	eo=mtch_idxs[n].rm_eo;
-	strncpy(rstr, &(tstr[so]), eo-so);
-	printf("Your embedded data is: %s\n", rstr);
 
 	//Dear gcc, shut up
 	return 1;
