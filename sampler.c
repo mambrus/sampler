@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2012 by Michael Ambrus                                  *
+ *   Copyright (C) 2013 by Michael Ambrus                                  *
  *   ambrmi09@gmail.com                                                    *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
