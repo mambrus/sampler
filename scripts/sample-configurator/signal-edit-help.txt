@@ -27,7 +27,7 @@ Field descriptions
 ----------
     0=not persistent i.e. constant reopen
     1=persistent
-    3=best effort
+    2=best effort
 
 5 Regexp identifying line to parse.
 -----------------------------------
