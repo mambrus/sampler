@@ -64,17 +64,21 @@ $"
  * really */
 #define MAX_DFN_LINES 1024
 
+/* Max number of sub-signals. Just a number for sanity-checks really */
+#define MAX_SUBSIGS 10
+	
 /* Takes one line describing a sample-signal and make a signal scruct of it.
  * Return 0 if all OK.*/
-static int parse_dfn_line(char *line, struct smpl_signal *rsig, int n) {
-	int rc,i;
+static int parse_dfn_line(char *line, struct smpl_signal *rsig, int lno) {
+	int rc,i,j,len;
 	char err_str[80]="\0"; /* Auto-fills with \0 */
-	/*Need to add +1 (extra) as index matches the whole pattern */
+	/*Need to add +1 (extra) as index 0 matches the whole pattern */
 	regmatch_t mtch_idxs[MAX_DFN_COLUMNS+1];
+	char *sptr;
 
 	if (!rsig)
 		return -1;
-	if (n<0 || n>MAX_DFN_LINES)
+	if (lno<0 || lno>MAX_DFN_LINES)
 		return -2;
 
 	rc=regexec(&preg, line, MAX_DFN_COLUMNS+1, mtch_idxs, 0);
@@ -84,14 +88,104 @@ static int parse_dfn_line(char *line, struct smpl_signal *rsig, int n) {
 		return(rc);
 	}
 	
-	/* Loop trough and put '\0' everywhere where pattern ends. Note that
-	 * index=0 matches the compete pattern. I.e. add +1 */
+	/* Loop trough input-line and put '\0' everywhere where pattern ends.
+	 * Note that index=0 matches the compete pattern. I.e. add +1 */
 	for (i=1; i<=MAX_DFN_COLUMNS; i++) {
 		line[mtch_idxs[i].rm_eo]=0;
 		printf("%02d: %s\n", i, &(line[mtch_idxs[i].rm_so]));
-		
 	}
+
+	rsig->sig_def.id			= lno;
+	rsig->sig_def.name			= strdup(&(line[mtch_idxs[SNAME].rm_so]));
+	rsig->sig_def.fname			= strdup(&(line[mtch_idxs[SFNAME].rm_so]));
+	rsig->sig_def.fdata			= strdup(&(line[mtch_idxs[SFDATA].rm_so]));
+	rsig->sig_def.persist		= atoi(&(line[mtch_idxs[SPERS].rm_so]));
+	
+	/*Parse the line identifier regex*/
+	rsig->sig_def.rgx_line.str	= strdup(&(line[mtch_idxs[SRGXL].rm_so]));
+	if (rsig->sig_def.rgx_line.str[0]) { 
+		rc=regcomp(
+			&(rsig->sig_def.rgx_line.rgx), 
+			rsig->sig_def.rgx_line.str, 
+			REG_EXTENDED
+		);
+		if (rc) {
+			regerror(rc, &(rsig->sig_def.rgx_line.rgx), err_str, 80);
+			fprintf(stderr, "Regcomp faliure: %s\n", err_str);
+			return(rc);
+		}
+	}
+	
+	/*Parse the signal pattern */
+	rsig->sig_def.rgx_sig.str	= strdup(&(line[mtch_idxs[SRGXS].rm_so]));
+	if (rsig->sig_def.rgx_sig.str[0]) { 
+		rc=regcomp(
+			&(rsig->sig_def.rgx_sig.rgx), 
+			rsig->sig_def.rgx_sig.str, 
+			REG_EXTENDED
+		);
+		if (rc) {
+			regerror(rc, &(rsig->sig_def.rgx_sig.rgx), err_str, 80);
+			fprintf(stderr, "Regcomp faliure: %s\n", err_str);
+			return(rc);
+		}
+	}
+	
+	sptr=&(line[mtch_idxs[SIDXS].rm_so]);
+	len=strlen(sptr);
+
+	if (!len) {
+		/* Field is not filled in, which is a special case. It corresponds
+		 * to one sub-signal, matching the whole regex, but there's no need
+		 * to parse */
+		rsig->sig_def.idxs				= calloc(1, sizeof(int));
+		assert(rsig->sig_def.idxs);
+		(rsig->sig_def.idxs)[0]			= 0;
+		rsig->sig_data.nsigs			= 1;
+		rsig->sig_data.sigs				= calloc(1, sizeof(struct sig_sub));
+		assert(rsig->sig_data.sigs);
+		(rsig->sig_data.sigs)[0].belong	= &rsig->sig_data;
+		(rsig->sig_data.sigs)[0].sub_sig= 0;
+	} else {
+		/* Parse the sub-signals string. */
+		int instr=0;
+		char *tptr=sptr;
+		int nidx=0;
+
+		/* To make separation into array easier, replace every non ASCII
+		 * digit with \0. Also take the opportunity to count the number of
+		 * sub-signals */
+		for (instr=0, i=0, nidx=0; i<len; i++) {
+			if (tptr[i] >= '0' && tptr[i] <= '9') {
+				if (!instr) {
+					instr=1;
+					nidx++;
+				}
+			} else {
+				tptr[i] = 0;
+				instr=0;
+			}
+		}
+	
+		rsig->sig_data.nsigs = nidx;
+		rsig->sig_def.idxs = calloc(nidx, sizeof(int));
+		memset(rsig->sig_def.idxs, 0, nidx*sizeof(int));
+		rsig->sig_data.sigs	= calloc(nidx, sizeof(struct sig_sub));
+		assert(rsig->sig_data.sigs);
+		memset(rsig->sig_def.idxs, 0, nidx*sizeof(struct sig_sub));
 		
+		tptr=sptr;
+		
+		for (instr=0,i=0,j=0; i<len; i++) {
+			if (tptr[i] >= '0' && tptr[i] <= '9') {
+				if (!instr) {
+					instr=1;
+					(rsig->sig_def.idxs)[j++]=atoi(&tptr[i]);
+				}
+			} else
+				instr=0;
+		}
+	}
 	return 0;
 } 
 
@@ -99,7 +193,7 @@ static int parse_initfile(const char *fn) {
 	FILE *fl;
 	int rc,lno=0;
 	char line[MAX_DFN_LINE_LEN],*rcs;
-	struct smpl_signal tsig;
+	struct smpl_signal *tsig;
 
 	fl=fopen(fn,"r");
 	if (fl==NULL) {
@@ -108,27 +202,32 @@ static int parse_initfile(const char *fn) {
 		exit(1);
 	}
 	
-	for (
-		lno=0,rc=0;
-		rc==0; 
-		lno++
-	) {
+	for (lno=0,rc=0; rc==0; lno++) {
 		rcs=fgets(line, MAX_DFN_LINE_LEN, fl);
 		if (rcs){
 			int len=strnlen(line, MAX_DFN_LINE_LEN);
 			if (len>0 && len<MAX_DFN_LINE_LEN) {
 				if ( line[0] != '#' && len>0 ) {
-					//Ignore lines starting with '#' and empty lines
-					//Can't handle "empty" lines with whites yet TBD
+					/* Ignore lines starting with '#' and empty lines
+					 * Can't handle "empty" lines with whites yet TBD */
 					
 					/* Line below: Get rid of the EOL. Not sure why this is
 					 * needed as REG_NOTEOL was not given to regexec.
 					 * Perhaps miss-understanding standard. Need check TBD
 					 * */
 					line[len-1]=0;
-					rc=parse_dfn_line(line, &tsig, lno);
+					tsig=malloc(sizeof(struct smpl_signal));
+					assert(tsig);
+					rc=parse_dfn_line(line, tsig, lno);
+					if (!rc) {
+						/* Add to list */
+						/* TBD */
+					} else {
+						/* Handle error */
+						/* TBD */
+					}
 				} else {
-					//OK, just ignored
+					/* OK, just ignored */
 					rc=0;
 				}
 			}

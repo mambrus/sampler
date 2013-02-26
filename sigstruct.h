@@ -25,10 +25,11 @@
 
 
 /* Most data are strings representing some sort of numerical value (int,
- * floats of various sizes. This size is currently   adapted to string
- * representation of max precision single floats.  2x11   characters + comma
- * + sign + terminating \0.  Kernels usually don't use floats   internally.
- * I.e. a value of 25  should be more than enough) */
+ * floats of various sizes. This size is currently adapted to string
+ * representation of max precision single floats:
+ * 2x11 characters + comma  + sign + terminating \0.
+ * Kernels usually don't use floats internally. I.e. a value of 25 should
+ * be more than enough) */
 #define VAL_STR_MAX 25
 
 enum persist {
@@ -39,7 +40,7 @@ enum persist {
 };
 
 struct regexp {
-	char *string;		/* The string originally describing the regex. Note:
+	char *str;			/* The string originally describing the regex. Note:
 						   Might be invalid data depending on usage (as it's
 						   used only once to compile the regex below). */
 	regex_t rgx;		/* Compiled version of the regex. This data must
@@ -49,7 +50,6 @@ struct regexp {
 /* Broken down signal. This struct is 1:1 mapped of one parsed definition
  * line */
 struct sig_def {
-	struct signal *belong;
 	int  id;				/* Line number */
 	char *name;				/* Signal name (symbolic) */
 	char *fname;			/* Signal name from file */
@@ -59,6 +59,15 @@ struct sig_def {
 	struct regexp rgx_sig;	/* Signal regex */
 	int  *idxs;				/* Sub-match index */
 };
+
+#define SID		0
+#define SNAME	1
+#define SFNAME	2
+#define SFDATA	3
+#define SPERS	4
+#define SRGXL	5
+#define SRGXS	6
+#define SIDXS	7
 
 /* Sub-signal. A signal can have several sub-signal, but always has at
  * at least one */
@@ -80,7 +89,7 @@ struct sig_data {
 							   Periodic: Data-file stopped existing or error
 							   Event: Not updated since last run, or error */
 	int nsigs;				/* Number of sub-signals */
-	struct sig_sub sigs[];	/* Array of sub-signals. Note: sub_sig is of fixed
+	struct sig_sub *sigs;	/* Array of sub-signals. Note: sub_sig is of fixed
 							   size. If this change, this table must be converted
 							   to '**' or '*[]' (TBD) */
 };
