@@ -4,7 +4,7 @@ LOCAL_MODULE := sampler
 LOCAL_SRC_FILESS := \
    main.c \
    sampler.c \
-   list.c
+   mlist.c
 
 LOCAL_CFLAGS :=
 #LOCAL_CFLAGS := -DNDEBUG

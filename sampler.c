@@ -220,7 +220,7 @@ static int parse_initfile(const char *fn) {
 					assert(tsig);
 					rc=parse_dfn_line(line, tsig, lno);
 					if (!rc) {
-						/* Add to list */
+						/* Add to mlist */
 						/* TBD */
 					} else {
 						/* Handle error */
