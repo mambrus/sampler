@@ -32,14 +32,14 @@ else
     endif
 endif
 
-ifdef LIB_STATIC
-    $(info "Build will build and use it's libraries static" )
-    $(info "To build/use dynamic libs: unset LIB_STATIC" )
-    LOCAL_LIBS := $(addsuffix .a, ${LOCAL_LIBS})
-else
+ifdef LIB_DYNAMIC
     $(info "Build will build and use it's libraries dynamic" )
-    $(info "To build all static: export LIB_STATIC='y'" )
+    $(info "To build/use static libs: unset LIB_DYNAMIC" )
     LOCAL_LIBS := $(addsuffix .so, ${LOCAL_LIBS})
+else
+    $(info "Build will build and use it's libraries static" )
+    $(info "To build all dynamic: export LIB_DYNAMIC='y'" )
+    LOCAL_LIBS := $(addsuffix .a, ${LOCAL_LIBS})
 endif
 
 clean:
@@ -70,10 +70,10 @@ $(LOCAL_MODULE): Makefile ${LOCAL_LIBS} $(LOCAL_SRC_FILESS:c=o)
 	( gcc -c $(CFLAGS) ${@:o=c} -o ${@} 2>&1 ) | grcat conf.gcc
 
 libmlist.so: mlist.c Makefile
-	( gcc $(CFLAGS) -shared -Wl,-init,mlist_init,-fini,mlist_fini mlist.c -o ${@} 2>&1 ) | grcat conf.gcc
+	( gcc $(CFLAGS) -shared mlist.c -o ${@} 2>&1 ) | grcat conf.gcc
 
 libmlist.a: mlist.c Makefile
-	( gcc -c $(CFLAGS) -Wl,-init,mlist_init,-fini,mlist_fini mlist.c -o ${@} 2>&1 ) | grcat conf.gcc
+	( gcc -c $(CFLAGS) mlist.c -o ${@} 2>&1 ) | grcat conf.gcc
 
 else
 
@@ -86,9 +86,9 @@ $(LOCAL_MODULE): Makefile ${LOCAL_LIBS} $(LOCAL_SRC_FILESS:c=o)
 	@gcc -c $(CFLAGS) ${@:o=c} -o ${@}
 
 libmlist.so: mlist.c Makefile
-	@gcc $(CFLAGS) -shared -Wl,-init,mlist_init,-fini,mlist_fini mlist.c -o ${@} 2>&1
+	@gcc $(CFLAGS) -shared mlist.c -o ${@} 2>&1
 
 libmlist.a: mlist.c Makefile
-	@gcc -c $(CFLAGS) -Wl,-init,mlist_init,-fini,mlist_fini mlist.c -o ${@} 2>&1
+	@gcc -c $(CFLAGS) mlist.c -o ${@} 2>&1
 
 endif

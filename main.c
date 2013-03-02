@@ -32,6 +32,46 @@
 #include <assert.h>
 
 #include "sampler.h"
+#include "mlist.h"
+
+/* TinKer version (generic) */
+typedef void* __drv_finit_f(void*);
+typedef __drv_finit_f *drv_finit_t;
+#define DRV_IO_NAME( x, y ) x ##y
+#define DRV_IO( x ) DRV_IO_NAME( mymodule_ , x )
+
+void *DRV_IO(test)(void* inarg) {
+		printf("<< Hello >>\n");
+}
+drv_finit_t DRV_IO(myfunkptr) __attribute__ ((section (".mupp"))) =DRV_IO(test);
+
+
+/* Simplified version */
+
+#define SECTION( S ) __attribute__ ((section ( S )))
+void test(void) {
+		printf("<< Hello2 >>\n");
+		DRV_IO(test)(NULL);
+}
+void (*funcptr)(void) SECTION(".dtors") =test;
+
+
+void __fini tost() {
+		fprintf(stderr,"Hoppla----------->\n");
+}
+
+void mupp() {
+		fprintf(stderr,"<----------Hoppla\n");
+}
+
+int Elf_Init(void)
+{
+  	__asm__ (".section .init \n call Elf_Init \n .section .text\n");
+
+	mupp();
+
+	return 1;
+}
 
 int main(int argc, char **argv) {
 	if (argc != 2) {
@@ -45,3 +85,4 @@ int main(int argc, char **argv) {
 	delete_mlist(1);
 	return 0;
 }
+

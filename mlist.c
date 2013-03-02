@@ -21,7 +21,6 @@
 #include <stdio.h>
 #include <assert.h>
 #include "mlist.h"
-#define SECTION( S ) __attribute__((section ( S )))
 
 struct modstruct {
 	int isinit;
@@ -30,7 +29,7 @@ struct modstruct {
 };
 
 static struct modstruct module = {
-	.isinit = 0,
+	.isinit = 1,
 	.hndlpool = 0,
 	.mlists = NULL
 };
@@ -98,16 +97,35 @@ struct node *mlist_dsrct_first(int handle) {
 	assert(module.isinit);
 };
 
+static void mupp2() {
+		fprintf(stderr,"<----------Hoppla\n");
+}
+
+static int Elf_Init2(void)
+{
+  	__asm__ (".section .init \n call Elf_Init2 \n .section .text\n");
+
+	mupp2();
+
+	return 1;
+}
+
 
 /* Module initializers */
-void mlist_init(void) {
+void __init mlist_init(void) {
 #ifndef NDEBUG	
 	printf("==========_init==========\n");
 #endif
 	//module.isinit=1;
 }
+void __init mlist_init2(void) {
+#ifndef NDEBUG	
+	printf("==========_init2==========\n");
+#endif
+	//module.isinit=1;
+}
 
-void mlist_fini(void) {
+void __fini mlist_fini(void) {
 #ifndef NDEBUG	
 	printf("==========_fini==========\n");
 #endif
