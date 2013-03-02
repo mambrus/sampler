@@ -41,5 +41,7 @@ int main(int argc, char **argv) {
 
 	sampler_init(argv[1]);
 	//sampler_init(argv[1], atoi(argv[2]));
+	//
+	delete_mlist(1);
 	return 0;
 }

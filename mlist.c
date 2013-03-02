@@ -17,3 +17,102 @@
  *   Free Software Foundation, Inc.,                                       *
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
+
+#include <stdio.h>
+#include <assert.h>
+#include "mlist.h"
+#define SECTION( S ) __attribute__((section ( S )))
+
+struct modstruct {
+	int isinit;
+	int hndlpool;
+	struct node *mlists;
+};
+
+static struct modstruct module = {
+	.isinit = 0,
+	.hndlpool = 0,
+	.mlists = NULL
+};
+
+
+int create_mlist(int sz) {
+	assert(module.isinit);
+};
+
+int delete_mlist(int handle) {
+	assert(module.isinit);
+};
+
+struct node *mlist_next(int handle) {
+	assert(module.isinit);
+};
+struct node *mlist_prev(int handle) {
+	assert(module.isinit);
+};
+
+struct node *mlist_head(int handle) {
+	assert(module.isinit);
+};
+struct node *mlist_tail(int handle) {
+	assert(module.isinit);
+};
+
+struct node *mlist_new(int handle) {
+	assert(module.isinit);
+};
+struct node *mlist_new_last(int handle) {
+	assert(module.isinit);
+};
+struct node *mlist_new_first(int handle) {
+	assert(module.isinit);
+};
+
+struct node *mlist_add(int handle) {
+	assert(module.isinit);
+};
+struct node *mlist_add_last(int handle) {
+	assert(module.isinit);
+};
+struct node *mlist_add_first(int handle) {
+	assert(module.isinit);
+};
+
+struct node *mlist_del(int handle) {
+	assert(module.isinit);
+};
+struct node *mlist_del_last(int handle) {
+	assert(module.isinit);
+};
+struct node *mlist_del_first(int handle) {
+	assert(module.isinit);
+};
+
+struct node *mlist_dsrct(int handle) {
+	assert(module.isinit);
+};
+struct node *mlist_dsrct_last(int handle) {
+	assert(module.isinit);
+};
+struct node *mlist_dsrct_first(int handle) {
+	assert(module.isinit);
+};
+
+
+/* Module initializers */
+void mlist_init(void) {
+#ifndef NDEBUG	
+	printf("==========_init==========\n");
+#endif
+	//module.isinit=1;
+}
+
+void mlist_fini(void) {
+#ifndef NDEBUG	
+	printf("==========_fini==========\n");
+#endif
+	/* Destroy all lists if not already done. Note: will not take care of
+	 * lists containing allocated payloads. This is not a garbage collector
+	 * */
+	module.isinit=0;
+}

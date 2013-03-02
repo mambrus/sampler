@@ -4,7 +4,9 @@ LOCAL_MODULE := sampler
 LOCAL_SRC_FILESS := \
    main.c \
    sampler.c \
-   mlist.c
+
+LOCAL_LIBS := \
+   libmlist
 
 LOCAL_CFLAGS :=
 #LOCAL_CFLAGS := -DNDEBUG
@@ -30,11 +32,23 @@ else
     endif
 endif
 
+ifdef LIB_STATIC
+    $(info "Build will build and use it's libraries static" )
+    $(info "To build/use dynamic libs: unset LIB_STATIC" )
+    LOCAL_LIBS := $(addsuffix .a, ${LOCAL_LIBS})
+else
+    $(info "Build will build and use it's libraries dynamic" )
+    $(info "To build all static: export LIB_STATIC='y'" )
+    LOCAL_LIBS := $(addsuffix .so, ${LOCAL_LIBS})
+endif
+
 clean:
 	rm -f *.o
 	rm -f *.lib
 	rm -f $(LOCAL_MODULE)
 	rm -f tags
+	rm -f *.so
+	rm -f *.a
 
 install: ${HOME}/bin/$(LOCAL_MODULE)
 
@@ -46,22 +60,35 @@ tags: $(shell ls *.[ch])
 	@ctags --options=.cpatterns --exclude=@.cexclude -o tags -R *
 
 ifeq ($(HAS_GRCAT), yes)
-$(LOCAL_MODULE): Makefile $(LOCAL_SRC_FILESS:c=o)
+$(LOCAL_MODULE): Makefile ${LOCAL_LIBS} $(LOCAL_SRC_FILESS:c=o)
 	@rm -f $(LOCAL_MODULE)
-	@( gcc -o$(LOCAL_MODULE) $(CFLAGS) $(LOCAL_SRC_FILESS:c=o) -lpthread 2>&1 ) | grcat conf.gcc
+	( gcc -o$(LOCAL_MODULE) $(CFLAGS) $(LOCAL_SRC_FILESS:c=o) -L`pwd` -lmlist -lpthread 2>&1 ) | grcat conf.gcc
 	@echo $(LOCAL_MODULE) done...
+	@echo If mlib build as shared lib remember to: export LD_LIBRARY_PATH=`pwd`
 
 %.o: %.c Makefile
-	@( gcc -c $(CFLAGS) ${@:o=c} -o ${@} 2>&1 ) | grcat conf.gcc
+	( gcc -c $(CFLAGS) ${@:o=c} -o ${@} 2>&1 ) | grcat conf.gcc
+
+libmlist.so: mlist.c Makefile
+	( gcc $(CFLAGS) -shared -Wl,-init,mlist_init,-fini,mlist_fini mlist.c -o ${@} 2>&1 ) | grcat conf.gcc
+
+libmlist.a: mlist.c Makefile
+	( gcc -c $(CFLAGS) -Wl,-init,mlist_init,-fini,mlist_fini mlist.c -o ${@} 2>&1 ) | grcat conf.gcc
 
 else
 
-$(LOCAL_MODULE): Makefile $(LOCAL_SRC_FILESS:c=o)
+$(LOCAL_MODULE): Makefile ${LOCAL_LIBS} $(LOCAL_SRC_FILESS:c=o)
 	@rm -f $(LOCAL_MODULE)
-	@gcc -o$(LOCAL_MODULE) $(CFLAGS) $(LOCAL_SRC_FILESS:c=o) -lpthread
+	@gcc -o$(LOCAL_MODULE) $(CFLAGS) $(LOCAL_SRC_FILESS:c=o) -L`pwd` -lmlist -lpthread
 	@echo ">>>> Build $(LOCAL_MODULE) success! <<<<"
 
 %.o: %.c Makefile
 	@gcc -c $(CFLAGS) ${@:o=c} -o ${@}
+
+libmlist.so: mlist.c Makefile
+	@gcc $(CFLAGS) -shared -Wl,-init,mlist_init,-fini,mlist_fini mlist.c -o ${@} 2>&1
+
+libmlist.a: mlist.c Makefile
+	@gcc -c $(CFLAGS) -Wl,-init,mlist_init,-fini,mlist_fini mlist.c -o ${@} 2>&1
 
 endif
