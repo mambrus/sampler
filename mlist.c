@@ -29,7 +29,7 @@ struct modstruct {
 };
 
 static struct modstruct module = {
-	.isinit = 1,
+	.isinit = 0,
 	.hndlpool = 0,
 	.mlists = NULL
 };
@@ -97,32 +97,12 @@ struct node *mlist_dsrct_first(int handle) {
 	assert(module.isinit);
 };
 
-static void mupp2() {
-		fprintf(stderr,"<----------Hoppla\n");
-}
-
-static int Elf_Init2(void)
-{
-  	__asm__ (".section .init \n call Elf_Init2 \n .section .text\n");
-
-	mupp2();
-
-	return 1;
-}
-
-
 /* Module initializers */
 void __init mlist_init(void) {
 #ifndef NDEBUG	
 	printf("==========_init==========\n");
 #endif
-	//module.isinit=1;
-}
-void __init mlist_init2(void) {
-#ifndef NDEBUG	
-	printf("==========_init2==========\n");
-#endif
-	//module.isinit=1;
+	module.isinit=1;
 }
 
 void __fini mlist_fini(void) {
