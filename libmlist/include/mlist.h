@@ -21,9 +21,6 @@
 #ifndef mlist_h
 #define mlist_h
 
-#define __init __attribute__((constructor))
-#define __fini __attribute__((destructor))
-
 /* This a linked list library which is C++ inspired. It is meant to be
  * fairly simple and fast, therefore it's (currently) not thread-safe. Nodes
  * are accessed directly as is without regards to any concurrent thread

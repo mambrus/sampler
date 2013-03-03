@@ -5,12 +5,12 @@ ifneq (${MAKELEVEL},0)
 LOCAL_MODULE := libsampler
 LOCAL_SRC_FILESS := \
    sampler.c  \
-   sampler_config.c \
-   sampler_exec.c
+   parse_setup.c \
+   runengine.c 
 
 LOCAL_LIBS := \
-	pthread \
-	mlist
+    pthread \
+    mlist
 
 LOCAL_CFLAGS :=
 #LOCAL_CFLAGS := -DNDEBUG

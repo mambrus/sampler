@@ -18,23 +18,11 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <assert.h>
-#include <sampler.h>
-#include "local.h"
+#ifndef local_h
+#define local_h
 
-int sampler_init(const char *siginitfn) {
-	int rc;
-	int listhandler;
+#define __init __attribute__((constructor))
+#define __fini __attribute__((destructor))
 
-	
-	rc=parse_initfile(siginitfn, &listhandler); 
-	/*TBD: Add better error-handling*/
-	assert(rc==0);
-
-	rc=create_executor(listhandler);
-
-
-	//Dear gcc, shut up
-	return(0);
-}
+#endif /* local_h */
 

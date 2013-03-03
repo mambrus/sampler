@@ -20,10 +20,11 @@
 
 /* Local interface & stuff of sampler-module  */
 
-#ifdef sampler_local_h
-#define sampler_local_h
+#ifdef local_h
+#define local_h
 
 int parse_initfile(const char *fn, int *listhndl);
+int create_executor(int list);
 
-#endif /* sampler_local_h */
+#endif /* local_h */
 

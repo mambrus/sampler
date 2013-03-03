@@ -30,7 +30,7 @@
 #include <assert.h>
 
 /* Local definitions */
-#include "sampler_local.h" 
+#include "local.h" 
 /* Private definitions */
 #include "sigstruct.h"
 

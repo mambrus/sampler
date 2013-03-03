@@ -22,7 +22,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include <mlist.h>
-
+#include "local.h"
 
 /* Administrative keeper of all lists */
 struct modstruct {
