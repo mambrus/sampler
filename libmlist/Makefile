@@ -2,21 +2,17 @@ PHONIES=build all clean install uninstall
 
 ifneq (${MAKELEVEL},0)
 
-LOCAL_MODULE := sampler
+LOCAL_MODULE := libmlist
 LOCAL_SRC_FILESS := \
-   main.c
+   mlist.c
 
-LOCAL_LIBS := \
-   sampler \
-   mlist
+LOCAL_LIBS :=
 
 LOCAL_CFLAGS :=
 #LOCAL_CFLAGS := -DNDEBUG
 LOCAL_C_INCLUDES += ${HOME}/include
 LOCAL_LDLIBS += ${HOME}/lib
-LOCAL_SUBMODULES := \
-   libmlist \
-   libsampler
+LOCAL_SUBMODULES :=
 
 .PHONY: ${PHONIES} ${LOCAL_SUBMODULES}
 
@@ -27,7 +23,7 @@ ifeq (${WHOAMI},root)
 else
     INSTALLDIR=${HOME}
 endif
-EXHEADERS=$(shell ls include/*.h) 
+EXHEADERS=$(shell ls include/*.h)
 LOCAL_C_INCLUDES := $(addprefix -I , ${LOCAL_C_INCLUDES})
 LOCAL_LDLIBS:= $(addprefix -L, ${LOCAL_LDLIBS})
 LOCAL_LIBS:= ${LOCAL_LDLIBS} $(addprefix -l, ${LOCAL_LIBS})
@@ -38,11 +34,23 @@ CFLAGS += -I ./include ${LOCAL_C_INCLUDES}
 CLEAN_MODS := $(patsubst %, $(MAKE) clean -C %;,$(LOCAL_SUBMODULES))
 UNINST_MODS := $(patsubst %, $(MAKE) uninstall -C %;,$(LOCAL_SUBMODULES))
 
-build: ${LOCAL_SUBMODULES} tags $(LOCAL_MODULE)
+ifdef LIB_DYNAMIC
+    $(info Build will build and use it's libraries: dynamic )
+    $(info To build/use static libs: unset LIB_DYNAMIC )
+    LOCAL_MODULE := $(addsuffix .so, ${LOCAL_MODULE})
+    MODULE_FLAGS := -shared
+else
+    $(info Build will build and use it's libraries: static )
+    $(info To build all dynamic: export LIB_DYNAMIC='y' )
+    LOCAL_MODULE := $(addsuffix .a, ${LOCAL_MODULE})
+    MODULE_FLAGS := -static
+endif
+
+LOCAL_MODULE := lib/${LOCAL_MODULE}
+build: tags $(LOCAL_MODULE)
 all: install
 
 ${LOCAL_SUBMODULES}:
-	echo "Diving into submodule: $@"
 	$(MAKE) -e -k -C $@ install
 
 clean:
@@ -51,24 +59,34 @@ clean:
 	rm -f $(LOCAL_MODULE)
 	rm -f tags
 
-install: ${INSTALLDIR}/bin/${LOCAL_MODULE}
+install: ${INSTALLDIR}/lib/${LOCAL_MODULE} ${INSTALLDIR}/${EXHEADERS}
 
 uninstall:
 	$(UNINST_MODS)
-	rm -rf ${INSTALLDIR}/bin/${LOCAL_MODULE}
+	rm -rf ${INSTALLDIR}/lib/${LOCAL_MODULE}
+	bash -c '${INSTALLDIR}; rm ${EXHEADERS}'
 
-${INSTALLDIR}/bin/${LOCAL_MODULE}: $(LOCAL_MODULE)
-	mkdir -p ${INSTALLDIR}/bin
+${INSTALLDIR}/lib/${LOCAL_MODULE}: $(LOCAL_MODULE)
+	mkdir -p ${INSTALLDIR}/lib
 	rm -f ${INSTALLDIR}/${LOCAL_MODULE}
 	cp $(LOCAL_MODULE) ${INSTALLDIR}/${LOCAL_MODULE}
+
+${INSTALLDIR}/${EXHEADERS}: $(LOCAL_MODULE) ${EXHEADERS}
+	mkdir -p $(shell dirname ${@})
+	rm -f ${@}
+	cp include/$(shell basename ${@}) ${@}
 
 tags: $(shell ls *.[ch])
 	ctags --options=.cpatterns --exclude=@.cexclude -o tags -R *
 
+
 $(LOCAL_MODULE): Makefile $(LOCAL_SRC_FILESS:c=o)
 	rm -f $(LOCAL_MODULE)
-	gcc $(CFLAGS) $(MODULE_FLAGS) $(LOCAL_SRC_FILESS:c=o) ${LOCAL_LIBS} -o ${@} 
-	@echo "Remember for dev runs: export LD_LIBRARY_PATH=${INSTALLDIR}/lib"
+ifdef LIB_DYNAMIC
+	gcc $(CFLAGS) $(MODULE_FLAGS) $(LOCAL_SRC_FILESS:c=o) ${LOCAL_LIBS} -o ${@}
+else
+	ar rcs ${@} ${LOCAL_AR_LIBS} $(LOCAL_SRC_FILESS:c=o)
+endif
 	@echo ">>>> Build $(LOCAL_MODULE) success! <<<<"
 
 %.o: %.c Makefile

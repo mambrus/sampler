@@ -1,0 +1,4 @@
+Public interface(s) go here
+
+I.e. header files that when installed go into either /usr/include or
+/user/local/include.

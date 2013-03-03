@@ -1,0 +1,4 @@
+Directory for sampler module/library
+
+It can be built either as a library ur used as a module. Library is
+prefered.
