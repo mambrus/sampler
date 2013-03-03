@@ -41,14 +41,17 @@
 struct node {
 	struct node* prev;
 	struct node* next;
-	LDATA *payload;
+	LDATA *pl;             /* Payload */
 };
 
 /* Create a new mlist with payload size sz. Returns handle */
-int create_mlist(int sz);
+int create_mlist(int sz, int (*cmpfunc)(LDATA *lval, LDATA *rval));
 
 /* Deletes mlist */
 int delete_mlist(int handle);
+
+/* Same as delete mlist, but also frees payload */
+int dstrct_mlist(int handle);
 
 /* Simple iterators */
 struct node *mlist_next(int handle);
@@ -74,7 +77,8 @@ struct node *mlist_add_first(int handle);
 
 
 /* Delete a node. Deletes a node at iterator position. Assumes payload is
- * already empty. Iterator position is shifted to node just before in list
+ * already empty. Iterator position is shifted to node just after in list.
+ * Returns NULL when list is empty
  * */
 struct node *mlist_del(int handle);
 struct node *mlist_del_last(int handle);
@@ -83,9 +87,9 @@ struct node *mlist_del_first(int handle);
 /* Destruct a node. As delete API, but also frees payload. Note, any
  * sub-elements in payload has to be destroyed separately first (this is not
  * C++) */
-struct node *mlist_dsrct(int handle);
-struct node *mlist_dsrct_last(int handle);
-struct node *mlist_dsrct_first(int handle);
+struct node *mlist_dstrct(int handle);
+struct node *mlist_dstrct_last(int handle);
+struct node *mlist_dstrct_first(int handle);
 
 #endif /* list_h */
 
