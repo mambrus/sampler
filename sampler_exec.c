@@ -18,20 +18,10 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <sampler.h>
-#include "sampler_local.h"
+/* This file contains stuff needed for running the sampler. I.e. the threads
+ * and logic synchronizing them */
 
-int sampler_init(const char *siginitfn) {
-	int rc;
-	int listhandler;
+#include <pthread.h>
 
-	
-	rc=parse_initfile(siginitfn, &listhandler); 
-	/*TBD: Add better error-handling*/
-	assert(rc==0);
-
-
-	//Dear gcc, shut up
-	return(0);
-}
-
+/* Include module common stuff */
+#include "sampler.h"

@@ -2,7 +2,11 @@ LOCAL_PATH:= $(call my-dir)
 
 include $(CLEAR_VARS)
 LOCAL_SHARED_LIBRARIES := libmlist
-LOCAL_SRC_FILES:= main.c sampler.c
+LOCAL_SRC_FILES:= \
+   main.c sampler.c \
+   sampler_config.c \
+   sampler_exec.c
+
 LOCAL_MODULE := sampler
 include $(BUILD_EXECUTABLE)
 

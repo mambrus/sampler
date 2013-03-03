@@ -4,6 +4,8 @@ LOCAL_MODULE := sampler
 LOCAL_SRC_FILESS := \
    main.c \
    sampler.c \
+   sampler_config.c \
+   sampler_exec.c
 
 LOCAL_LIBS := \
    libmlist

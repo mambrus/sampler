@@ -18,20 +18,12 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <sampler.h>
-#include "sampler_local.h"
+/* Local interface & stuff of sampler-module  */
 
-int sampler_init(const char *siginitfn) {
-	int rc;
-	int listhandler;
+#ifdef sampler_local_h
+#define sampler_local_h
 
-	
-	rc=parse_initfile(siginitfn, &listhandler); 
-	/*TBD: Add better error-handling*/
-	assert(rc==0);
+int parse_initfile(const char *fn, int *listhndl);
 
-
-	//Dear gcc, shut up
-	return(0);
-}
+#endif /* sampler_local_h */
 
