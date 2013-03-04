@@ -143,7 +143,7 @@ static int parse_dfn_line(const regex_t *preg, char *line, struct smpl_signal *r
 		rsig->sig_data.sigs				= calloc(1, sizeof(struct sig_sub));
 		assert(rsig->sig_data.sigs);
 		(rsig->sig_data.sigs)[0].belong	= &rsig->sig_data;
-		(rsig->sig_data.sigs)[0].sub_sig= 0;
+		(rsig->sig_data.sigs)[0].nr_sig = 0;
 	} else {
 		/* Parse the sub-signals string. */
 		int instr=0;

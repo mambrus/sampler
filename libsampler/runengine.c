@@ -22,6 +22,107 @@
  * and logic synchronizing them */
 
 #include <pthread.h>
+#include <semaphore.h>
+#include <mlist.h>
+#include <stdio.h>
+#include <assert.h>
 
 /* Include module common stuff */
 #include "sampler.h"
+#include "sigstruct.h"
+
+/* Counting semaphore, main synchronizer. Lock is taken once for each thread
+ * and all are released at once by the master releasing it n-times
+ * simultaneously */
+static sem_t start_barrier;
+static sem_t end_barrier;
+
+/* Used non-counting, as a simple synchronizer letting master know at least
+ * one thread has started and counting end-barrier is taken.*/
+static pthread_mutex_t workers = PTHREAD_MUTEX_INITIALIZER;
+
+/* Simple worker thread. As in-data it takes it's own list-slot (i.e. no
+ * need to search and no concurrency aspects. It knows nothing about when to
+ * run, the poll_master dictates each run. */
+void *poll_worker_thread(void* inarg) {
+	struct sig_sub *signal = inarg;
+	struct sig_data *sigadmin = signal->belong;
+
+	while(1) {
+		sem_wait(&start_barrier);
+		sem_wait(&end_barrier);    /* Will not block, just takes a token */
+		pthread_mutex_unlock(&workers);    /* Tell master OK to continue */
+		printf("Running %d\n",signal->nr_sig);
+
+		/*Tell master one more is finished*/
+		sem_post(&end_barrier);
+	}
+}
+
+/* Simple poll master. It tells when it's group of workers should run my
+ * releasing a semaphore periodically according to period time it
+ * administers. It's responsible for keeping time of each sample, and to
+ * jitter compensate if needed. */
+void *poll_master_thread(void* inarg) {
+	struct sig_data *sigadmin = inarg;
+	int i;
+
+	while(1) {
+		/* Tell all workers go!*/
+		for(i=0; i<sigadmin->nsigs; i++) sem_post(&start_barrier);
+		pthread_mutex_lock(&workers); /* Wait for one worker to start */
+		printf("Master has released %d workers\n",sigadmin->nsigs);
+
+		/* Wait for all to finish */
+		sem_wait(&end_barrier);
+
+		/* Record time, output sample, calculate jitter-factor*/
+		/* TBD */
+	}
+}
+
+int create_executor(int list) {
+	int rc,i,j;
+	struct node *n;
+	struct sig_sub *signal;
+	struct sig_data *sigadmin;
+	struct smpl_signal *sample;
+
+	/* stub this for now. Just glue together to get compiler to check for
+	 * missing dependencies. What's missing is a implemented list. Remove
+	 * ASAP or when better stub is available */
+	return(0);
+
+	sem_init(&start_barrier, 0, 0);  /* Start with no tokens, all workers
+										will block waiting for the master
+									  */
+	sem_init(&end_barrier, 0, 0);    /* Start with no tokens. Worker must
+										take tokens */
+	pthread_mutex_lock(&workers);    /* Make sure Master blocks */
+
+	/* Create a worker-thread for each sub-signal */
+	for(n=mlist_head(list); n; n=mlist_next(list)){
+		assert(n->pl);
+
+		sample=(struct smpl_signal *)(n->pl);
+		sigadmin=&((*sample).sig_data);
+		for(j=0; j<sigadmin->nsigs; j++){
+			signal=&((sigadmin->sigs)[j]);
+			rc=pthread_create(
+				&signal->worker,  
+				NULL, 
+				poll_worker_thread, 
+				signal
+			);
+			assert(rc==0);
+		}
+	}
+
+	rc=pthread_create(
+		&sigadmin->master,  
+		NULL, 
+		poll_master_thread, 
+		sigadmin
+	);
+	assert(rc==0);
+}

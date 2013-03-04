@@ -23,6 +23,8 @@
 #ifndef sigstruct_h
 #define sigstruct_h
 
+#include <pthread.h>
+#include <regex.h>
 
 /* Most data are strings representing some sort of numerical value (int,
  * floats of various sizes. This size is currently adapted to string
@@ -73,14 +75,10 @@ struct sig_def {
  * at least one */
 struct sig_sub {
 	struct sig_data *belong;/* Pointer back to the owner */
-	int sub_sig;			/* Which sub-signal this this (if sub-signals
+	int nr_sig;				/* Which sub-signal this this (if sub-signals
 							   defined). 0 if no sub-signals */
 	char val[VAL_STR_MAX];  /* Read value */
-};
-
-/* Structure containing data to be harvested on each iteration */
-struct sig_data {
-	int fd;					/* File descriptor of the data-file */
+	pthread_t worker;		/* Worker thread */
 	struct timeval rtime;	/* Time-stamp of last time read. Note: this field
 							   only used if needed (i.e. non fixed-rate
 							   periodic sampling). */
@@ -88,10 +86,16 @@ struct sig_data {
 							   updating:
 							   Periodic: Data-file stopped existing or error
 							   Event: Not updated since last run, or error */
+};
+
+/* Structure containing data to be harvested on each iteration */
+struct sig_data {
+	int fd;					/* File descriptor of the data-file */
 	int nsigs;				/* Number of sub-signals */
 	struct sig_sub *sigs;	/* Array of sub-signals. Note: sub_sig is of fixed
 							   size. If this change, this table must be converted
 							   to '**' or '*[]' (TBD) */
+	pthread_t master;		/* Master thread (if master/worker model is used)*/
 };
 
 /* One compile signal. Might be missing pthread owning signal to make killing

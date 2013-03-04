@@ -32,6 +32,8 @@ int sampler_init(const char *siginitfn) {
 	assert(rc==0);
 
 	rc=create_executor(listhandler);
+	/*TBD: Add better error-handling*/
+	assert(rc==0);
 
 
 	//Dear gcc, shut up
