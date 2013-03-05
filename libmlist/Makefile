@@ -1,4 +1,4 @@
-PHONIES=build all clean install uninstall
+PHONIES=install build all clean uninstall
 
 ifneq (${MAKELEVEL},0)
 
@@ -68,12 +68,12 @@ uninstall:
 	rm -rf ${INSTALLDIR}/lib/${LOCAL_MODULE}
 	bash -c '${INSTALLDIR}; rm ${EXHEADERS}'
 
-${INSTALLDIR}/lib/${LOCAL_MODULE}: $(LOCAL_MODULE)
+${INSTALLDIR}/lib/${LOCAL_MODULE}: build
 	mkdir -p ${INSTALLDIR}/lib
 	rm -f ${INSTALLDIR}/${LOCAL_MODULE}
 	cp $(LOCAL_MODULE) ${INSTALLDIR}/${LOCAL_MODULE}
 
-${INSTALLDIR}/${EXHEADERS}: $(LOCAL_MODULE) ${EXHEADERS}
+${INSTALLDIR}/${EXHEADERS}: build ${EXHEADERS}
 	mkdir -p $(shell dirname ${@})
 	rm -f ${@}
 	cp include/$(shell basename ${@}) ${@}

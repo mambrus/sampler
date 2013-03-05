@@ -20,11 +20,14 @@
 
 #ifndef local_h
 #define local_h
+
 #define LDATA struct listhead
 #include <mlist.h>
 
 #define __init __attribute__((constructor))
 #define __fini __attribute__((destructor))
+
+#define TBD_UNFINISHED "Code not finished!!! (TBD)"
 
 /* Administrative keeper of all lists */
 struct mlistmod_struct {
@@ -52,7 +55,7 @@ struct listhead {
 	 * search and sort is not supported */
 	int (*cmpfunc)(LDATA *lval, LDATA *rval);
 	struct node *pstart;  /* List-star */
-	struct node *pend;    /* List-end */
+	struct node *plast;    /* List-end */
 };
 
 #endif /* local_h */

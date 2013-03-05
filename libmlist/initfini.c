@@ -26,7 +26,6 @@
 #include <sys/types.h>
 #include "local.h"
 
-
 /* "Constructor" / "Destructor" */
 /*----------------------------------------------------------------------*/
 /* Module initializers */
@@ -35,10 +34,9 @@ void __init mlist_init(void) {
 	printf("==========_init==========\n");
 #endif
 	assert(!mlistmod_data.isinit);
-	mlistmod_data.nlists = 0;
-	mlistmod_data.mlists = malloc(sizeof(struct node));
-	assert(mlistmod_data.mlists);
-	memset(mlistmod_data.mlists, 0, sizeof(struct node));
+	mlistmod_data.nlists = 0,
+	mlistmod_data.mlists = NULL,
+
 	mlistmod_data.isinit=1;
 }
 

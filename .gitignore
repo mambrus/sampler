@@ -2,5 +2,7 @@ sampler
 files.s3
 tags
 *.o
+*.a
+*.so
 *.swp
 *.*~

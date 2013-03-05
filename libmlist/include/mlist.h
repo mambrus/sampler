@@ -53,41 +53,41 @@ int create_mlist(
 		handle_t *hndl);
 
 /* Deletes mlist. Returns error code */
-int delete_mlist(handle_t handle);
+int delete_mlist(const handle_t handle);
 
 /* Simple iterators */
-struct node *mlist_next(handle_t handle);
-struct node *mlist_prev(handle_t handle);
+struct node *mlist_next(const handle_t handle);
+struct node *mlist_prev(const handle_t handle);
 
 /* Go-to's */
-struct node *mlist_head(handle_t handle);
-struct node *mlist_tail(handle_t handle);
+struct node *mlist_head(const handle_t handle);
+struct node *mlist_tail(const handle_t handle);
 
 /* Node insert:
  * Note: Node will be allocated on heap and inserted in list at iterator
  * position, or at position indicated by name */
-struct node *mlist_add(handle_t handle, const LDATA *data);
-struct node *mlist_add_last(handle_t handle, const LDATA *data);
-struct node *mlist_add_first(handle_t handle, const LDATA *data);
+struct node *mlist_add(const handle_t handle, const LDATA *data);
+struct node *mlist_add_last(const handle_t handle, const LDATA *data);
+struct node *mlist_add_first(const handle_t handle, const LDATA *data);
 
 
 /* Delete a node. Deletes a node at iterator position. Assumes payload is
  * already empty. Iterator position is shifted to node just after in list.
  * Returns NULL when list is empty
  * */
-struct node *mlist_del(handle_t handle);
-struct node *mlist_del_last(handle_t handle);
-struct node *mlist_del_first(handle_t handle);
+struct node *mlist_del(const handle_t handle);
+struct node *mlist_del_last(const handle_t handle);
+struct node *mlist_del_first(const handle_t handle);
 
 /* Destruct a node. As delete API, but also frees payload. Note, any
  * sub-elements in payload has to be destroyed separately first (this is not
  * C++) */
-struct node *mlist_dstrct(handle_t handle);
-struct node *mlist_dstrct_last(handle_t handle);
-struct node *mlist_dstrct_first(handle_t handle);
+struct node *mlist_dstrct(const handle_t handle);
+struct node *mlist_dstrct_last(const handle_t handle);
+struct node *mlist_dstrct_first(const handle_t handle);
 
-struct node *mlist_lseek(handle_t handle, off_t offset, int whence);
-struct node *mlist_search(const LDATA *data);
+struct node *mlist_lseek(const handle_t handle, off_t offset, int whence);
+struct node *mlist_search(const handle_t handle, const LDATA *data);
 
 #endif /* list_h */
 
