@@ -1,0 +1,4 @@
+
+let $LIB_DYNAMIC = "y"
+let $LD_LIBRARY_PATH = "/home/mambrus/lib"
+nmap <silent> <leader>d :!kdbg ./sampler &<CR>
