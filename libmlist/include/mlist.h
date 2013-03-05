@@ -31,9 +31,13 @@
 #define LDATA void
 #endif
 
+#include <stdint.h>
+typedef uintptr_t handle_t;
+
 #ifndef NULL
 #define NULL ((void*)0)
 #endif
+
 
 struct node {
 	struct node* prev;
@@ -41,52 +45,55 @@ struct node {
 	LDATA *pl;             /* Payload */
 };
 
-/* Create a new mlist with payload size sz. Returns handle */
-int create_mlist(int sz, int (*cmpfunc)(LDATA *lval, LDATA *rval));
+/* Create a new mlist with payload size sz in hndl. Returns error code */
+int create_mlist(
+		int sz,
+		int (*cmpfunc)(LDATA *lval, LDATA *rval),
+		handle_t *hndl);
 
-/* Deletes mlist */
-int delete_mlist(int handle);
+/* Deletes mlist. Returns error code */
+int delete_mlist(handle_t handle);
 
-/* Same as delete mlist, but also frees payload */
-int dstrct_mlist(int handle);
+/* Same as delete mlist, but also frees payload. Returns error code */
+int dstrct_mlist(handle_t handle);
 
 /* Simple iterators */
-struct node *mlist_next(int handle);
-struct node *mlist_prev(int handle);
+struct node *mlist_next(handle_t handle);
+struct node *mlist_prev(handle_t handle);
 
 /* Go-to's */
-struct node *mlist_head(int handle);
-struct node *mlist_tail(int handle);
+struct node *mlist_head(handle_t handle);
+struct node *mlist_tail(handle_t handle);
 
 /* New node creation:
  * Note: Both new node and payload will be allocated on heap,
  * payload will *not* be initialized (this is not C++) */
-struct node *mlist_new(int handle);
-struct node *mlist_new_last(int handle);
-struct node *mlist_new_first(int handle);
+struct node *mlist_new(handle_t handle);
+struct node *mlist_new_last(handle_t handle);
+struct node *mlist_new_first(handle_t handle);
 
 /* Node insert:
  * Note: Node will be allocated on heap and inserted in list at iterator
  * position, or at position indicated by name */
-struct node *mlist_add(int handle);
-struct node *mlist_add_last(int handle);
-struct node *mlist_add_first(int handle);
+struct node *mlist_add(handle_t handle, const LDATA *data);
+struct node *mlist_add_last(handle_t handle);
+struct node *mlist_add_first(handle_t handle);
 
 
 /* Delete a node. Deletes a node at iterator position. Assumes payload is
  * already empty. Iterator position is shifted to node just after in list.
  * Returns NULL when list is empty
  * */
-struct node *mlist_del(int handle);
-struct node *mlist_del_last(int handle);
-struct node *mlist_del_first(int handle);
+struct node *mlist_del(handle_t handle);
+struct node *mlist_del_last(handle_t handle);
+struct node *mlist_del_first(handle_t handle);
 
 /* Destruct a node. As delete API, but also frees payload. Note, any
  * sub-elements in payload has to be destroyed separately first (this is not
  * C++) */
-struct node *mlist_dstrct(int handle);
-struct node *mlist_dstrct_last(int handle);
-struct node *mlist_dstrct_first(int handle);
+struct node *mlist_dstrct(handle_t handle);
+struct node *mlist_dstrct_last(handle_t handle);
+struct node *mlist_dstrct_first(handle_t handle);
 
 #endif /* list_h */
 

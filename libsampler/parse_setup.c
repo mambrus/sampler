@@ -30,9 +30,12 @@
 #include <assert.h>
 
 /* Local definitions */
-#include "local.h" 
+#include "local.h"
 /* Private definitions */
 #include "sigstruct.h"
+
+#define LDATA struct smpl_signal
+#include <mlist.h>
 
 #define TESTF( F ) (feof(F) || ferror(F))
 
@@ -64,7 +67,9 @@ $"
 
 /* Max number of sub-signals. Just a number for sanity-checks really */
 #define MAX_SUBSIGS 10
-	
+
+static int sigdef_compare(LDATA *lval, LDATA *rval);
+
 /* Takes one line describing a sample-signal and make a signal scruct of it.
  * Return 0 if all OK.*/
 static int parse_dfn_line(const regex_t *preg, char *line, struct smpl_signal *rsig, int lno) {
@@ -85,7 +90,7 @@ static int parse_dfn_line(const regex_t *preg, char *line, struct smpl_signal *r
 		fprintf(stderr, "Regcomp faliure: %s\n", err_str);
 		return(rc);
 	}
-	
+
 	/* Loop trough input-line and put '\0' everywhere where pattern ends.
 	 * Note that index=0 matches the compete pattern. I.e. add +1 */
 	for (i=1; i<=MAX_DFN_COLUMNS; i++) {
@@ -98,13 +103,13 @@ static int parse_dfn_line(const regex_t *preg, char *line, struct smpl_signal *r
 	rsig->sig_def.fname			= strdup(&(line[mtch_idxs[SFNAME].rm_so]));
 	rsig->sig_def.fdata			= strdup(&(line[mtch_idxs[SFDATA].rm_so]));
 	rsig->sig_def.persist		= atoi(&(line[mtch_idxs[SPERS].rm_so]));
-	
+
 	/*Parse the line identifier regex*/
 	rsig->sig_def.rgx_line.str	= strdup(&(line[mtch_idxs[SRGXL].rm_so]));
-	if (rsig->sig_def.rgx_line.str[0]) { 
+	if (rsig->sig_def.rgx_line.str[0]) {
 		rc=regcomp(
-			&(rsig->sig_def.rgx_line.rgx), 
-			rsig->sig_def.rgx_line.str, 
+			&(rsig->sig_def.rgx_line.rgx),
+			rsig->sig_def.rgx_line.str,
 			REG_EXTENDED
 		);
 		if (rc) {
@@ -113,13 +118,13 @@ static int parse_dfn_line(const regex_t *preg, char *line, struct smpl_signal *r
 			return(rc);
 		}
 	}
-	
+
 	/*Parse the signal pattern */
 	rsig->sig_def.rgx_sig.str	= strdup(&(line[mtch_idxs[SRGXS].rm_so]));
-	if (rsig->sig_def.rgx_sig.str[0]) { 
+	if (rsig->sig_def.rgx_sig.str[0]) {
 		rc=regcomp(
-			&(rsig->sig_def.rgx_sig.rgx), 
-			rsig->sig_def.rgx_sig.str, 
+			&(rsig->sig_def.rgx_sig.rgx),
+			rsig->sig_def.rgx_sig.str,
 			REG_EXTENDED
 		);
 		if (rc) {
@@ -128,7 +133,7 @@ static int parse_dfn_line(const regex_t *preg, char *line, struct smpl_signal *r
 			return(rc);
 		}
 	}
-	
+
 	sptr=&(line[mtch_idxs[SIDXS].rm_so]);
 	len=strlen(sptr);
 
@@ -164,16 +169,16 @@ static int parse_dfn_line(const regex_t *preg, char *line, struct smpl_signal *r
 				instr=0;
 			}
 		}
-	
+
 		rsig->sig_data.nsigs = nidx;
 		rsig->sig_def.idxs = calloc(nidx, sizeof(int));
 		memset(rsig->sig_def.idxs, 0, nidx*sizeof(int));
 		rsig->sig_data.sigs	= calloc(nidx, sizeof(struct sig_sub));
 		assert(rsig->sig_data.sigs);
 		memset(rsig->sig_def.idxs, 0, nidx*sizeof(struct sig_sub));
-		
+
 		tptr=sptr;
-		
+
 		for (instr=0,i=0,j=0; i<len; i++) {
 			if (tptr[i] >= '0' && tptr[i] <= '9') {
 				if (!instr) {
@@ -185,27 +190,29 @@ static int parse_dfn_line(const regex_t *preg, char *line, struct smpl_signal *r
 		}
 	}
 	return 0;
-} 
+}
 
 /* Converts signals described in abstract file and put it in a mlist
- * container. Handle to the mlist is placed in listhndl. Return value tells
+ * container. Handle to the mlist is placed in list. Return value tells
  * if parsing went well, i.e. if the returned list is valid or not. */
-int parse_initfile(const char *fn, int *listhndl) {
+int parse_initfile(const char *fn, handle_t *list) {
 	FILE *fl;
 	int rc,lno=0;
 	char line[MAX_DFN_LINE_LEN],*rcs;
 	struct smpl_signal *tsig;
 	char err_str[80];
 	regex_t preg; /* Compiled version of definition regex for one line */
-	
-	memset(err_str,0,80); 
+
+	memset(err_str,0,80);
 	rc=regcomp(&preg, DFN_LINE, REG_EXTENDED);
 	if (rc) {
 		regerror(rc, &preg, err_str, 80);
-		fprintf(stderr, "Regcomp faliure("__FILE__":%d): %s\n", 
+		fprintf(stderr, "Regcomp faliure("__FILE__":%d): %s\n",
 			__LINE__, err_str);
 		return(1);
 	}
+	rc=create_mlist(sizeof(struct smpl_signal), sigdef_compare, list);
+	assert(rc==0); assert(list);
 
 	fl=fopen(fn,"r");
 	if (fl==NULL) {
@@ -213,7 +220,7 @@ int parse_initfile(const char *fn, int *listhndl) {
 		perror("Signal description file-error:");
 		exit(1);
 	}
-	
+
 	for (lno=0,rc=0; rc==0; lno++) {
 		rcs=fgets(line, MAX_DFN_LINE_LEN, fl);
 		if (rcs){
@@ -222,7 +229,7 @@ int parse_initfile(const char *fn, int *listhndl) {
 				if ( line[0] != '#' && len>0 ) {
 					/* Ignore lines starting with '#' and empty lines
 					 * Can't handle "empty" lines with whites yet TBD */
-					
+
 					/* Line below: Get rid of the EOL. Not sure why this is
 					 * needed as REG_NOTEOL was not given to regexec.
 					 * Perhaps miss-understanding standard. Need check TBD
@@ -233,7 +240,7 @@ int parse_initfile(const char *fn, int *listhndl) {
 					rc=parse_dfn_line(&preg, line, tsig, lno);
 					if (!rc) {
 						/* Add to mlist */
-						/* TBD */
+						mlist_add(tsig,list);
 					} else {
 						/* Handle error */
 						/* TBD */
@@ -267,12 +274,16 @@ int parse_initfile(const char *fn, int *listhndl) {
 			goto fin_pars_init;
 		}
 	}
-	
+
 	rc = ENOSYS;
 fin_pars_init:
 	regfree(&preg);
-	
+
 	fclose(fl);
 	return(rc);
-} 
+}
 
+
+static int sigdef_compare(LDATA *lval, LDATA *rval){
+	return 0;
+}

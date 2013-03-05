@@ -20,18 +20,19 @@
 
 #include <assert.h>
 #include <sampler.h>
+#include <mlist.h>
 #include "local.h"
 
 int sampler_init(const char *siginitfn) {
 	int rc;
-	int listhandler;
+	handle_t list;
 
 	
-	rc=parse_initfile(siginitfn, &listhandler); 
+	rc=parse_initfile(siginitfn, &list); 
 	/*TBD: Add better error-handling*/
 	assert(rc==0);
 
-	rc=create_executor(listhandler);
+	rc=create_executor(list);
 	/*TBD: Add better error-handling*/
 	assert(rc==0);
 
