@@ -18,42 +18,12 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef local_h
-#define local_h
-#define LDATA struct listhead
-#include <mlist.h>
+#include "local.h"
 
-#define __init __attribute__((constructor))
-#define __fini __attribute__((destructor))
-
-/* Administrative keeper of all lists */
-struct mlistmod_struct {
-	int isinit;           /* Is this module initialized? I.e. does mlist
-							 below contain a valid pointer e.t.a.*/
-	int nlists;           /* Current number of lists in  list */
-	struct node *mlists;  /* List-head of lists. No need to sort to find.
-							 Handle is hash-key*/
+/* Module (global) data. Placed in struct to be easier to find by GDB. Must
+ * be global as several c-files belonging to the same module shares this */
+struct mlistmod_struct mlistmod_data = {
+	.isinit = 0,
+	.nlists = 0,
+	.mlists = NULL,
 };
-
-/* Indicate to others that someone is keeping this as global module data
- * (easier to find with GDB) */
-extern struct mlistmod_struct mlistmod_data;
-
-/* Data of this struct is the payload for the mlist variable in mlistmod_struct.
- * It's the administrative keeper of each list. */
-struct listhead {
-	struct node *p;	      /* Current (file) pointer */
-	off_t o;              /* Offset from start (in jumps jumps) */
-	int iindx;            /* Iterator index. File-pointer so to speak */
-	int nelem;            /* Current size of this list */
-	int pl_sz;            /* pay-load size */
-
-	/* Caller provided function used to search & sort list. Can be NULL if
-	 * search and sort is not supported */
-	int (*cmpfunc)(LDATA *lval, LDATA *rval);
-	struct node *pstart;  /* List-star */
-	struct node *pend;    /* List-end */
-};
-
-#endif /* local_h */
-

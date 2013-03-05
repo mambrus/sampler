@@ -26,96 +26,6 @@
 #include <sys/types.h>
 #include "local.h"
 
-struct listhead;
-#define LDATA struct listhead
-/* Administrative keeper of all lists */
-struct modstruct {
-	int isinit;           /* Is this module initialized? I.e. does mlist
-							 below contain a valid pointer e.t.a.*/
-	int nlists;           /* Current number of lists in  list */
-	struct node *mlists;  /* List-head of lists. No need to sort to find.
-							 Handle is hash-key*/
-} moddata = {
-	.isinit = 0,
-	.nlists = 0,
-	.mlists = NULL,
-};
-
-/* Data of this struct is the payload for the mlist variable in modstruct.
- * It's the administrative keeper of each list */
-struct listhead {
-	struct {
-		struct node *p;   /* Current pointer */
-		off_t o;          /* Offset from start (jumps) */
-	}fp;
-	int iindx;            /* Iterator index. File-pointer so to speak */
-	int nelem;            /* Current size of this list */
-	int pl_sz;            /* pay-load size */
-
-	/* Caller provided function used to search & sort list. Can be NULL if
-	 * search and sort is not supported */
-	int (*cmpfunc)(LDATA *lval, LDATA *rval);
-	struct node *pstart;  /* List-star */
-	struct node *pend;    /* List-end */
-};
-
-#include <mlist.h>
-/* "Constructor" / "Destructor" */
-/*----------------------------------------------------------------------*/
-/* Module initializers */
-void __init mlist_init(void) {
-#ifndef NDEBUG
-	printf("==========_init==========\n");
-#endif
-	assert(!moddata.isinit);
-	moddata.nlists = 0;
-	moddata.mlists = malloc(sizeof(struct node));
-	assert(moddata.mlists);
-	memset(moddata.mlists, 0, sizeof(struct node));
-	moddata.isinit=1;
-}
-
-void __fini mlist_fini(void) {
-	struct node *tnext;   /* Needed because race could happen */
-#ifndef NDEBUG
-	printf("==========_fini==========\n");
-#endif
-	assert(moddata.isinit);
-	/* Destroy all lists if not already done. Note: will not take care of
-	 * lists containing allocated payloads. This is not a garbage collector
-	 * */
-	for (
-		;
-		moddata.mlists;
-		moddata.nlists--, moddata.mlists=tnext
-	) {
-		fprintf(stderr,
-			"WARNING: Destructing un-freed list [%p]. "
-				"Possible leak\n",
-			moddata.mlists
-		);
-		if ((struct listhead*)(moddata.mlists->pl)){
-			struct node *tlist=((struct listhead*)(moddata.mlists->pl))->pstart;
-			int rc=0;
-
-			fprintf(stderr,
-				"WARNING: Destructing un-freed pay-load [%p]. "
-					"List id: [%p]\n",
-				moddata.mlists->pl , tlist
-			);
-			rc=dstrct_mlist((handle_t)tlist);
-			assert(rc==0);
-		}
-
-		tnext=moddata.mlists->next;
-		free(moddata.mlists);
-		moddata.mlists = NULL;
-	}
-
-	moddata.nlists = 0;
-	moddata.isinit=0;
-}
-/*----------------------------------------------------------------------*/
 static inline struct node *forward(off_t n) {
 };
 
@@ -128,87 +38,87 @@ int create_mlist(
 		handle_t *hndl
 ) {
 	struct node *p=NULL;
-	assert(moddata.isinit);
+	assert(mlistmod_data.isinit);
 
 	/*Create a list head in the empty payload*/
-	moddata.mlists->pl = malloc(sizeof(struct listhead));
-	assert(moddata.mlists->pl);
-	memset(moddata.mlists->pl, 0, sizeof(struct listhead));
+	mlistmod_data.mlists->pl = malloc(sizeof(struct listhead));
+	assert(mlistmod_data.mlists->pl);
+	memset(mlistmod_data.mlists->pl, 0, sizeof(struct listhead));
 	/*Create a new empty node in front*/
-	moddata.mlists->prev = malloc(sizeof(struct node));
-	assert(moddata.mlists->prev);
-	memset(moddata.mlists->prev, 0, sizeof(struct node));
-	moddata.mlists->prev->next = moddata.mlists;
+	mlistmod_data.mlists->prev = malloc(sizeof(struct node));
+	assert(mlistmod_data.mlists->prev);
+	memset(mlistmod_data.mlists->prev, 0, sizeof(struct node));
+	mlistmod_data.mlists->prev->next = mlistmod_data.mlists;
 	/*Cotinue initialize our nodes payload*/
-	moddata.mlists->pl->cmpfunc = cmpfunc;
+	mlistmod_data.mlists->pl->cmpfunc = cmpfunc;
 	/* Don't pre-create 1:st node. They are supposed to get sorted on creation
 	 * and we don't have that data yet */
-	moddata.mlists->pl->pstart = NULL;
-	*hndl=(handle_t)moddata.mlists;
-	moddata.nlists++;
+	mlistmod_data.mlists->pl->pstart = NULL;
+	*hndl=(handle_t)mlistmod_data.mlists;
+	mlistmod_data.nlists++;
 	/* Prepare for next creation */
-	moddata.mlists=moddata.mlists->prev;
+	mlistmod_data.mlists=mlistmod_data.mlists->prev;
 	return 0;
 };
 
 int delete_mlist(handle_t handle) {
-	assert(moddata.isinit);
+	assert(mlistmod_data.isinit);
 };
 int dstrct_mlist(handle_t handle) {
-	assert(moddata.isinit);
+	assert(mlistmod_data.isinit);
 };
 
 struct node *mlist_next(handle_t handle) {
-	assert(moddata.isinit);
+	assert(mlistmod_data.isinit);
 };
 struct node *mlist_prev(handle_t handle) {
-	assert(moddata.isinit);
+	assert(mlistmod_data.isinit);
 };
 
 struct node *mlist_head(handle_t handle) {
-	assert(moddata.isinit);
+	assert(mlistmod_data.isinit);
 	return (*(struct listhead*)(handle)).pstart;
 };
 struct node *mlist_tail(handle_t handle) {
-	assert(moddata.isinit);
+	assert(mlistmod_data.isinit);
 	return (*(struct listhead*)(handle)).pend;
 };
 
 struct node *mlist_add(handle_t handle, const LDATA *data) {
-	assert(moddata.isinit);
+	assert(mlistmod_data.isinit);
 };
 struct node *mlist_add_last(handle_t handle, const LDATA *data) {
-	assert(moddata.isinit);
+	assert(mlistmod_data.isinit);
 };
 struct node *mlist_add_first(handle_t handle, const LDATA *data) {
-	assert(moddata.isinit);
+	assert(mlistmod_data.isinit);
 };
 
 struct node *mlist_del(handle_t handle) {
-	assert(moddata.isinit);
+	assert(mlistmod_data.isinit);
 };
 struct node *mlist_del_last(handle_t handle) {
-	assert(moddata.isinit);
+	assert(mlistmod_data.isinit);
 };
 struct node *mlist_del_first(handle_t handle) {
-	assert(moddata.isinit);
+	assert(mlistmod_data.isinit);
 };
 
 struct node *mlist_dsrct(handle_t handle) {
-	assert(moddata.isinit);
+	assert(mlistmod_data.isinit);
 };
 struct node *mlist_dsrct_last(handle_t handle) {
-	assert(moddata.isinit);
+	assert(mlistmod_data.isinit);
 };
 struct node *mlist_dsrct_first(handle_t handle) {
-	assert(moddata.isinit);
+	assert(mlistmod_data.isinit);
 };
 
 struct node *mlist_lseek(handle_t handle, off_t offset, int whence) {
-	assert(moddata.isinit);
+	assert(mlistmod_data.isinit);
 };
 
 struct node *mlist_search(const LDATA *data) {
-	assert(moddata.isinit);
+	assert(mlistmod_data.isinit);
 };
 

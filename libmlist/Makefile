@@ -4,6 +4,8 @@ ifneq (${MAKELEVEL},0)
 
 LOCAL_MODULE := libmlist
 LOCAL_SRC_FILESS := \
+   modglobals.c \
+   initfini.c \
    mlist.c
 
 LOCAL_LIBS :=
