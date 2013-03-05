@@ -23,6 +23,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <string.h>
+#include <sys/types.h>
 #include "local.h"
 
 struct listhead;
@@ -43,6 +44,10 @@ struct modstruct {
 /* Data of this struct is the payload for the mlist variable in modstruct.
  * It's the administrative keeper of each list */
 struct listhead {
+	struct {
+		struct node *p;   /* Current pointer */
+		off_t o;          /* Offset from start (jumps) */
+	}fp;
 	int iindx;            /* Iterator index. File-pointer so to speak */
 	int nelem;            /* Current size of this list */
 	int pl_sz;            /* pay-load size */
@@ -50,7 +55,8 @@ struct listhead {
 	/* Caller provided function used to search & sort list. Can be NULL if
 	 * search and sort is not supported */
 	int (*cmpfunc)(LDATA *lval, LDATA *rval);
-	struct node *mlist;  /* The real list */
+	struct node *pstart;  /* List-star */
+	struct node *pend;    /* List-end */
 };
 
 #include <mlist.h>
@@ -89,7 +95,7 @@ void __fini mlist_fini(void) {
 			moddata.mlists
 		);
 		if ((struct listhead*)(moddata.mlists->pl)){
-			struct node *tlist=((struct listhead*)(moddata.mlists->pl))->mlist;
+			struct node *tlist=((struct listhead*)(moddata.mlists->pl))->pstart;
 			int rc=0;
 
 			fprintf(stderr,
@@ -110,6 +116,12 @@ void __fini mlist_fini(void) {
 	moddata.isinit=0;
 }
 /*----------------------------------------------------------------------*/
+static inline struct node *forward(off_t n) {
+};
+
+static inline struct node *reverse(off_t n) {
+};
+
 int create_mlist(
 		int sz,
 		int (*cmpfunc)(LDATA *lval, LDATA *rval),
@@ -131,7 +143,7 @@ int create_mlist(
 	moddata.mlists->pl->cmpfunc = cmpfunc;
 	/* Don't pre-create 1:st node. They are supposed to get sorted on creation
 	 * and we don't have that data yet */
-	moddata.mlists->pl->mlist = NULL;
+	moddata.mlists->pl->pstart = NULL;
 	*hndl=(handle_t)moddata.mlists;
 	moddata.nlists++;
 	/* Prepare for next creation */
@@ -155,31 +167,20 @@ struct node *mlist_prev(handle_t handle) {
 
 struct node *mlist_head(handle_t handle) {
 	assert(moddata.isinit);
-	return (*(struct listhead*)(handle)).mlist;
+	return (*(struct listhead*)(handle)).pstart;
 };
 struct node *mlist_tail(handle_t handle) {
 	assert(moddata.isinit);
-};
-
-struct node *mlist_new(handle_t handle) {
-	assert(moddata.isinit);
-};
-struct node *mlist_new_last(handle_t handle) {
-//	struct listhead *p;
-	assert(moddata.isinit);
-//(*(struct listhead*)(handle))
-};
-struct node *mlist_new_first(handle_t handle) {
-	assert(moddata.isinit);
+	return (*(struct listhead*)(handle)).pend;
 };
 
 struct node *mlist_add(handle_t handle, const LDATA *data) {
 	assert(moddata.isinit);
 };
-struct node *mlist_add_last(handle_t handle) {
+struct node *mlist_add_last(handle_t handle, const LDATA *data) {
 	assert(moddata.isinit);
 };
-struct node *mlist_add_first(handle_t handle) {
+struct node *mlist_add_first(handle_t handle, const LDATA *data) {
 	assert(moddata.isinit);
 };
 
@@ -200,6 +201,14 @@ struct node *mlist_dsrct_last(handle_t handle) {
 	assert(moddata.isinit);
 };
 struct node *mlist_dsrct_first(handle_t handle) {
+	assert(moddata.isinit);
+};
+
+struct node *mlist_lseek(handle_t handle, off_t offset, int whence) {
+	assert(moddata.isinit);
+};
+
+struct node *mlist_search(const LDATA *data) {
 	assert(moddata.isinit);
 };
 

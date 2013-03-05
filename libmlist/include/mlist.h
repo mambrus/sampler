@@ -32,6 +32,7 @@
 #endif
 
 #include <stdint.h>
+#include <sys/types.h>
 typedef uintptr_t handle_t;
 
 #ifndef NULL
@@ -54,9 +55,6 @@ int create_mlist(
 /* Deletes mlist. Returns error code */
 int delete_mlist(handle_t handle);
 
-/* Same as delete mlist, but also frees payload. Returns error code */
-int dstrct_mlist(handle_t handle);
-
 /* Simple iterators */
 struct node *mlist_next(handle_t handle);
 struct node *mlist_prev(handle_t handle);
@@ -65,19 +63,12 @@ struct node *mlist_prev(handle_t handle);
 struct node *mlist_head(handle_t handle);
 struct node *mlist_tail(handle_t handle);
 
-/* New node creation:
- * Note: Both new node and payload will be allocated on heap,
- * payload will *not* be initialized (this is not C++) */
-struct node *mlist_new(handle_t handle);
-struct node *mlist_new_last(handle_t handle);
-struct node *mlist_new_first(handle_t handle);
-
 /* Node insert:
  * Note: Node will be allocated on heap and inserted in list at iterator
  * position, or at position indicated by name */
 struct node *mlist_add(handle_t handle, const LDATA *data);
-struct node *mlist_add_last(handle_t handle);
-struct node *mlist_add_first(handle_t handle);
+struct node *mlist_add_last(handle_t handle, const LDATA *data);
+struct node *mlist_add_first(handle_t handle, const LDATA *data);
 
 
 /* Delete a node. Deletes a node at iterator position. Assumes payload is
@@ -94,6 +85,9 @@ struct node *mlist_del_first(handle_t handle);
 struct node *mlist_dstrct(handle_t handle);
 struct node *mlist_dstrct_last(handle_t handle);
 struct node *mlist_dstrct_first(handle_t handle);
+
+struct node *mlist_lseek(handle_t handle, off_t offset, int whence);
+struct node *mlist_search(const LDATA *data);
 
 #endif /* list_h */
 

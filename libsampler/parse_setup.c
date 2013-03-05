@@ -240,7 +240,7 @@ int parse_initfile(const char *fn, handle_t *list) {
 					rc=parse_dfn_line(&preg, line, tsig, lno);
 					if (!rc) {
 						/* Add to mlist */
-						mlist_add(tsig,list);
+						mlist_add(*list,tsig);
 					} else {
 						/* Handle error */
 						/* TBD */
