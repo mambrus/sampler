@@ -25,6 +25,7 @@
 
 #include <pthread.h>
 #include <regex.h>
+#include <stdint.h>
 
 /* Most data are strings representing some sort of numerical value (int,
  * floats of various sizes. This size is currently adapted to string
@@ -34,12 +35,52 @@
  * be more than enough) */
 #define VAL_STR_MAX 25
 
+/* Bit-values defining data-file handling. Note tha the final value 0 (i.e.
+ * no bit set) has a special meaning and can't be "OR":ed to be compared 
+ * only be compared with 0 */
+#define NOASSUMPTION    ((uint64_t)0<<0)  /* Best effort. Try to reopen if
+											 not existing.*/ 
+
+#define OPENCLOSE       ((uint64_t)1<<1)  /* Sampler will always close after
+											 read and reopen prior next
+											 read. Useful for files (normal
+											 data-files) that might have
+											 been renamed like normal
+											 log-files.*/
+
+#define CANBLOCK        ((uint64_t)1<<2)  /* File can block. For even-driven
+											 sampling this is one possible
+											 trigger.  I.e. one file getting
+											 ready to deliver drivers the
+											 event even if files that can't
+											 block gets read. In such case
+											 whether or not data gets
+											 delivered depends on if the
+											 file has support or utime. If
+											 more than one blocking files
+											 are part of a configuration,
+											 the ones still blocked will not
+											 be asked to deliver data. */
+
+#define ALWAYS          ((uint64_t)1<<31)  /*File must exist and always
+											 deliver data. Failure doing so
+											 terminates execution */
+
+/* Enumeration to help determine combination of blocking state. Mostly not
+ * useful and entries night be missing, but has it's usefulness when
+ * debugging */
 enum persist {
-	no,						/* 0=not persistent i.e. constant reopen */
-	persistent,				/* 1=persistent */
-	best_effort				/* 2=best effort. If fd returns error, re-open
-							   and retry */
+	auto              = NOASSUMPTION,
+	notpersistent     = OPENCLOSE,
+	eventdriver       = CANBLOCK,
+	canblock          = CANBLOCK |  OPENCLOSE,
+	sentinel = UINT32_MAX   /*Assures enum will always be represented in at
+							  least this number of bits (even if members
+							  them self are still interpreted and limited to
+							  "int")*/
 };
+/* Hmm, above this is probably crap. Would be better with a union of 1-bit
+ * bit-field structs. */
 
 struct regexp {
 	char *str;			/* The string originally describing the regex. Note:
@@ -62,14 +103,16 @@ struct sig_def {
 	int  *idxs;				/* Sub-match index */
 };
 
-#define SID		0
-#define SNAME	1
-#define SFNAME	2
-#define SFDATA	3
-#define SPERS	4
-#define SRGXL	5
-#define SRGXS	6
-#define SIDXS	7
+/* Field indexes in definition line. If more data added, add to end to avoid
+ * breaking code. More complete information in the README */
+#define SID		0 /* Fake, doesn't exist. Index used in result as counter */
+#define SNAME	1 /* Signal name (symbolic)                               */
+#define SFNAME	2 /* Signal name from file                                */
+#define SFDATA	3 /* Data-file name                                       */
+#define SPERS	4 /* Datafile persistence                                 */
+#define SRGXL	5 /* Regexp identifying which line to parse               */
+#define SRGXS	6 /* Signal regex                                         */
+#define SIDXS	7 /* Sub-match index                                      */
 
 /* Sub-signal. A signal can have several sub-signal, but always has at
  * at least one */

@@ -87,7 +87,7 @@ static int parse_dfn_line(const regex_t *preg, char *line, struct smpl_signal *r
 	rc=regexec(preg, line, MAX_DFN_COLUMNS+1, mtch_idxs, 0);
 	if (rc) {
 		regerror(rc, preg, err_str, 80);
-		fprintf(stderr, "Regcomp faliure: %s\n", err_str);
+		fprintf(stderr, "Regexec faliure: %s\n", err_str);
 		return(rc);
 	}
 
