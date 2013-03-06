@@ -12,7 +12,7 @@ Field descriptions
 -----------------------
   Signal name is contained in this file. Name is expected to be the only
   content of this file. if string is longer than the length of #1, name
-  will be truncated from begining of text and and length characters long.
+  will be truncated from beginning of text and length characters long.
 
 3 Data-file name
 ----------------
@@ -20,7 +20,7 @@ Field descriptions
 
 4 Datafile persistence
 ----------------------
-  An integer value defining the source files persistency, i.e. if file
+  An integer value defining the source files persistence, i.e. if file
   needs to be opened constantly.
 
 4.1 Values
@@ -29,24 +29,25 @@ Field descriptions
     1=persistent
     2=best effort
 
-5 Regexp identifying line to parse.
+5 Regex identifying line to parse.
 -----------------------------------
-  NULL means dont't scan, use complete file (usually onle line)
+  Can be NULL, which means don't scan, use complete file as data (usually
+  one liner data-files which is quite common in sysfs)
 
-  Regexp follow extended regexp format. If escape charaters are needed, no
-  need to escape the escape (reg-exp text is read as is). Regexp can
-  contain sub-expressions, but no special care is taken about these. Match
-  applies to the complete line or not at all.
+  Regex follow extended regex format. If escape characters are needed, no
+  need to escape the escape (reg-exp text is read as is). Regex can contain
+  sub-expressions, but no special care is taken about these. Match applies
+  to the complete line or not at all.
 
-  Scanning file continues until first match. I.e if regexp would mactch
+  Scanning file continues until first match. I.e if regex would match
   more than one line, only the first line is considered for #6.
 
 6 Signal regex
 ---------------
   NULL means don't parse, use complete line as is.
 
-  Regexp follow extended regexp format. If escape charaters are needed, no
-  need to escape the escape (reg-exp text is read as is). Regexp can
+  Regex follow extended regex format. If escape characters are needed, no
+  need to escape the escape (reg-exp text is read as is). Regex can
   contain sub-expressions, in which case #7 is needed.
 
 7 Sub-match index
@@ -59,7 +60,7 @@ Field descriptions
   is larger than the largest sub-expression number in #6 would be an
   error.
 
-  NOTE: Errors ar not detected until runtime! It's a good idea to test
+  NOTE: Errors are not detected until runtime! It's a good idea to test
   your regex strings against known patterns before running them on target.
 
   If #6 contain sub-expressions this field contain which sub-expression
@@ -69,8 +70,8 @@ Field descriptions
   If field contain more than one sub-expression which with data, output
   will contain all subexpressions mentioned here, in the same order as
   mentioned an separated by the normal delimiter used as if it would be
-  several separate signals. Signal-name outputetd in the legend will be
+  several separate signals. Signal-name outputted in the legend will be
   suffixed with an index corresponding.
 
-  For a more specic signal name, two separate signals need be defined
-  parsig the same file and same line need be defined.
+  For a more specif signal name, two separate signals need be defined
+  parsing the same file and same line need be defined.

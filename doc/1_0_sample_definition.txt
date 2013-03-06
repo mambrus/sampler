@@ -1,10 +1,10 @@
 Sample definition
 ==================
 
-One sample is an entity occuring at a specific moment in time. Quite
+One sample is an entity occurring at a specific moment in time. Quite
 commonly periodical, or driven by some sort of event.
 
-One sampe has the followng properties.
+One sample has the following properties.
 
 Field description:
 ------------------
@@ -15,8 +15,10 @@ Field description:
 
 2 Event description (TBD)
 -------------------------
-  Some form of description about the event. Could be on each signals
-  update, or a specific signals update. Could be markes in log e.t.a.
+  ***NOTE: This sub-section is not finished. Concept still needs research*** 
+  
+  Some form of description about the event. Could be on each signals update,
+  or a specific signals update. Could be markers in log e.t.a.
 
 3 List of signals
 -----------------

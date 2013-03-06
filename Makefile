@@ -98,7 +98,7 @@ README_SCRIPT := \
 DOCFILES := $(shell ls doc/*)
 
 README.md: ${DOCFILES}
-	@echo "Generaring README.md file..."
+	@echo "Generaring file: README.md"
 	@${README_SCRIPT} > ${@}
 
 #========================================================================
