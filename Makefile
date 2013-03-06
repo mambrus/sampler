@@ -27,7 +27,7 @@ ifeq (${WHOAMI},root)
 else
     INSTALLDIR=${HOME}
 endif
-EXHEADERS=$(shell ls include/*.h) 
+EXHEADERS=$(shell ls include/*.h)
 LOCAL_C_INCLUDES := $(addprefix -I , ${LOCAL_C_INCLUDES})
 LOCAL_LDLIBS:= $(addprefix -L, ${LOCAL_LDLIBS})
 LOCAL_LIBS:= ${LOCAL_LDLIBS} $(addprefix -l, ${LOCAL_LIBS})
@@ -38,7 +38,7 @@ CFLAGS += -I ./include ${LOCAL_C_INCLUDES}
 CLEAN_MODS := $(patsubst %, $(MAKE) clean -C %;,$(LOCAL_SUBMODULES))
 UNINST_MODS := $(patsubst %, $(MAKE) uninstall -C %;,$(LOCAL_SUBMODULES))
 
-build: ${LOCAL_SUBMODULES} tags $(LOCAL_MODULE)
+build: ${LOCAL_SUBMODULES} tags README.md $(LOCAL_MODULE)
 all: install
 
 ${LOCAL_SUBMODULES}:
@@ -67,12 +67,39 @@ tags: $(shell ls *.[ch])
 
 $(LOCAL_MODULE): Makefile $(LOCAL_SRC_FILESS:c=o)
 	rm -f $(LOCAL_MODULE)
-	gcc $(CFLAGS) $(MODULE_FLAGS) $(LOCAL_SRC_FILESS:c=o) ${LOCAL_LIBS} -o ${@} 
+	gcc $(CFLAGS) $(MODULE_FLAGS) $(LOCAL_SRC_FILESS:c=o) ${LOCAL_LIBS} -o ${@}
 	@echo "Remember for dev runs: export LD_LIBRARY_PATH=${INSTALLDIR}/lib"
 	@echo ">>>> Build $(LOCAL_MODULE) success! <<<<"
 
 %.o: %.c Makefile
 	gcc -c $(CFLAGS) ${@:o=c} -o ${@}
+
+README_SCRIPT := \
+    FS=$$(ls doc/* | sort); \
+    for F in $$FS; do cat $$F | awk -vRFILE=$$F '\
+        BEGIN { \
+            CHAPT=gensub("[_.[:alpha:]]*$$","","g",RFILE); \
+            CHAPT=gensub("^.*/","","g",CHAPT); \
+            CHAPT=gensub("_",".","g",CHAPT); \
+        } \
+        NR==1{ \
+		    S=sprintf("Chapter %s: %s",CHAPT,toupper($$0)); \
+            printf("%s\n",S); \
+            for (i=0; i< length(S); i++) \
+                printf("="); \
+            printf("\n"); \
+            printf("\n"); \
+        } \
+        NR > 3{ \
+            print $$0 \
+        }'; \
+    done
+
+DOCFILES := $(shell ls doc/*)
+
+README.md: ${DOCFILES}
+	@echo "Generaring README.md file..."
+	@${README_SCRIPT} > ${@}
 
 #========================================================================
 else #First recursion level only executes this. Used for colorized output
@@ -96,7 +123,7 @@ else
     endif
 endif
 
-${PHONIES} $(patsubst %.c,%.o,$(wildcard *.c)) tags:
+${PHONIES} $(patsubst %.c,%.o,$(wildcard *.c)) tags README.md:
 ifeq ($(HAS_GRCAT), yes)
 	( $(MAKE) $(MFLAGS) -e -C . $@ 2>&1 ) | grcat conf.gcc
 else
