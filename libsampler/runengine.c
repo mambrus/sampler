@@ -23,9 +23,11 @@
 
 #include <pthread.h>
 #include <semaphore.h>
+#define LDATA struct smpl_signal
 #include <mlist.h>
 #include <stdio.h>
 #include <assert.h>
+#include <unistd.h>
 
 /* Include module common stuff */
 #include "sampler.h"
@@ -81,8 +83,9 @@ void *poll_master_thread(void* inarg) {
 	}
 }
 
-int create_executor(int list) {
+int create_executor(handle_t list) {
 	int rc,i,j;
+	volatile int k=0;
 	struct node *n;
 	struct sig_sub *signal;
 	struct sig_data *sigadmin;
@@ -91,14 +94,16 @@ int create_executor(int list) {
 	/* stub this for now. Just glue together to get compiler to check for
 	 * missing dependencies. What's missing is a implemented list. Remove
 	 * ASAP or when better stub is available */
-	return(0);
+	//return(0);
 
-	sem_init(&start_barrier, 0, 0);  /* Start with no tokens, all workers
-										will block waiting for the master
-									  */
-	sem_init(&end_barrier, 0, 0);    /* Start with no tokens. Worker must
-										take tokens */
-	pthread_mutex_lock(&workers);    /* Make sure Master blocks */
+	rc=sem_init(&start_barrier, 0, 0); /*Start with no tokens, all workers
+										 will block waiting for the master*/
+	assert(rc==0);
+	rc=sem_init(&end_barrier, 0, 0);   /*Start with no tokens. Worker must
+										 take tokens */
+	assert(rc==0);
+	rc=pthread_mutex_lock(&workers);    /*Make sure Master blocks */
+	assert(rc==0);
 
 	/* Create a worker-thread for each sub-signal */
 	for(n=mlist_head(list); n; n=mlist_next(list)){
@@ -115,6 +120,7 @@ int create_executor(int list) {
 				signal
 			);
 			assert(rc==0);
+			assert(k++<100); //Sanity-check,
 		}
 	}
 
@@ -125,4 +131,9 @@ int create_executor(int list) {
 		sigadmin
 	);
 	assert(rc==0);
+	while(1){ 
+	/* Really should joint the threads. But good for now. Root thread will
+	handle stdin, whilst poll_master_thread  handles output.*/
+		usleep(1000000);
+	}
 }

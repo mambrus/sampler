@@ -21,7 +21,7 @@
 #ifndef local_h
 #define local_h
 
-#define LDATA struct listhead
+#define LDATA struct listheader
 #include <mlist.h>
 
 #define __init __attribute__((constructor))
@@ -44,18 +44,17 @@ extern struct mlistmod_struct mlistmod_data;
 
 /* Data of this struct is the payload for the mlist variable in mlistmod_struct.
  * It's the administrative keeper of each list. */
-struct listhead {
+struct listheader {
 	struct node *p;	      /* Current (file) pointer */
 	off_t o;              /* Offset from start (in jumps jumps) */
-	int iindx;            /* Iterator index. File-pointer so to speak */
 	int nelem;            /* Current size of this list */
 	int pl_sz;            /* pay-load size */
 
 	/* Caller provided function used to search & sort list. Can be NULL if
 	 * search and sort is not supported */
 	int (*cmpfunc)(LDATA *lval, LDATA *rval);
-	struct node *pstart;  /* List-star */
-	struct node *plast;    /* List-end */
+	struct node *phead;   /* List-start */
+	struct node *ptail;   /* List-end */
 };
 
 #endif /* local_h */

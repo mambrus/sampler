@@ -59,8 +59,9 @@ void __fini mlist_fini(void) {
 				"Possible leak\n",
 			mlistmod_data.mlists
 		);
-		if ((struct listhead*)(mlistmod_data.mlists->pl)){
-			struct node *tlist=((struct listhead*)(mlistmod_data.mlists->pl))->pstart;
+		if ((struct listheader*)(mlistmod_data.mlists->pl)){
+			struct node *tlist=
+				((struct listheader*)(mlistmod_data.mlists->pl))->phead;
 			int rc=0;
 
 			fprintf(stderr,

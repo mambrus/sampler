@@ -200,6 +200,7 @@ int parse_initfile(const char *fn, handle_t *list) {
 	int rc,lno=0;
 	char line[MAX_DFN_LINE_LEN],*rcs;
 	struct smpl_signal *tsig;
+	struct node *smpl_rc;
 	char err_str[80];
 	regex_t preg; /* Compiled version of definition regex for one line */
 
@@ -211,7 +212,7 @@ int parse_initfile(const char *fn, handle_t *list) {
 			__LINE__, err_str);
 		return(1);
 	}
-	rc=create_mlist(sizeof(struct smpl_signal), sigdef_compare, list);
+	rc=create_mlist(sizeof(struct smpl_signal),NULL/*sigdef_compare*/, list);
 	assert(rc==0); assert(list);
 
 	fl=fopen(fn,"r");
@@ -240,7 +241,8 @@ int parse_initfile(const char *fn, handle_t *list) {
 					rc=parse_dfn_line(&preg, line, tsig, lno);
 					if (!rc) {
 						/* Add to mlist */
-						mlist_add(*list,tsig);
+						smpl_rc=mlist_add(*list,tsig);
+						assert(smpl_rc);
 					} else {
 						/* Handle error */
 						/* TBD */
