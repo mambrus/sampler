@@ -22,8 +22,11 @@
 
 #ifdef sampler_h
 #define sampler_h
+#include <stdio.h>
+#include <stdint.h>
 
-int sampler_init(const char *filename);
+int sampler_init(const char *filename, int period);
+int sampler_fini();
 
 #endif /* sampler_h */
 

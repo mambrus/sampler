@@ -18,39 +18,15 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <assert.h>
-#include <sampler.h>
-#include <mlist.h>
-#include "assert_np.h"
 #include "local.h"
 #include <limits.h>
+#include <stdint.h>
 
-/* Module public functions */
-int sampler_init(const char *filename, int period) {
-	int rc;
-	handle_t list;
-
-	rc=parse_initfile(filename, &list); 
-	/*TBD: Add better error-handling*/
-	assert(rc==0);
-
-	samplermod_data.ptime = period;
-
-	rc=create_executor(list);
-	/*TBD: Add better error-handling*/
-	assert(rc==0);
-
-	//Dear gcc, shut up
-	return(0);
-}
-
-int sampler_fini() {
-	int rc;
-	samplermod_data.isinit = 0,
-	self_destruct(samplermod_data.list);
-	samplermod_data.ptime = UINT_MAX;
-}
-
-/* Module private functions */
-int self_destruct(handle_t list) {
-}
+/* Module (global) data. Placed in struct to be easier to find by GDB. Must
+ * be global as several c-files belonging to the same module shares this */
+struct samplermod_struct samplermod_data = {
+	.isinit = 0,
+	.list = 0,
+	.ptime = -1,
+	.smplcntr = UINT64_MAX,
+};

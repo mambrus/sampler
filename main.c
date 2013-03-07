@@ -34,12 +34,14 @@
 #include "mlist.h"
 
 int main(int argc, char **argv) {
-	if (argc != 2) {
-		fprintf(stderr,"Need exactly one argument [%d]: full path of signals description file\n",argc);
+	if (argc != 3) {
+		fprintf(stderr,"Need exactly two arguments [%d]:\n"
+			"   <full path of signals description file>\n"
+			"   <period-time in us>\n",argc-1);
 		exit(1);
 	}
 
-	sampler_init(argv[1]);
+	sampler_init(argv[1],atoi(argv[2]));
 	//sampler_init(argv[1], atoi(argv[2]));
 	//
 	delete_mlist(1);

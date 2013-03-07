@@ -29,14 +29,14 @@
 #include <errno.h>
 #include <assert.h>
 #include <limits.h>
+#define LDATA struct smpl_signal
+#include <mlist.h>
 
 /* Local definitions */
 #include "local.h"
 /* Private definitions */
 #include "sigstruct.h"
 
-#define LDATA struct smpl_signal
-#include <mlist.h>
 
 #define TESTF( F ) (feof(F) || ferror(F))
 

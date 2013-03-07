@@ -4,9 +4,12 @@ ifneq (${MAKELEVEL},0)
 
 LOCAL_MODULE := libsampler
 LOCAL_SRC_FILESS := \
+   initfini.c \
+   modglobals.c \
    sampler.c  \
    parse_setup.c \
-   runengine.c 
+   runengine.c \
+   harvest.c
 
 LOCAL_LIBS := \
     pthread \

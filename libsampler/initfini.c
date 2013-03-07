@@ -18,39 +18,37 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <stdlib.h>
+#include <stdio.h>
 #include <assert.h>
-#include <sampler.h>
-#include <mlist.h>
-#include "assert_np.h"
+#include <errno.h>
+#include <string.h>
+#include <sys/types.h>
 #include "local.h"
-#include <limits.h>
 
-/* Module public functions */
-int sampler_init(const char *filename, int period) {
-	int rc;
-	handle_t list;
+/* Module initializers. Not much to do here for init, but fini might have
+ * clean-up to do, iterate through the list and:
+ * * kill threads
+ * * Free allocated memory
+ */
+void __init __sampler_init(void) {
+#ifndef NDEBUG
+	printf("==========_init  "__FILE__"==========\n");
+#endif
+	assert(!samplermod_data.isinit);
+	samplermod_data.smplcntr=0;
 
-	rc=parse_initfile(filename, &list); 
-	/*TBD: Add better error-handling*/
-	assert(rc==0);
-
-	samplermod_data.ptime = period;
-
-	rc=create_executor(list);
-	/*TBD: Add better error-handling*/
-	assert(rc==0);
-
-	//Dear gcc, shut up
-	return(0);
+	samplermod_data.isinit=1;
 }
 
-int sampler_fini() {
-	int rc;
-	samplermod_data.isinit = 0,
+void __fini __sampler_fini(void) {
+#ifndef NDEBUG
+	printf("==========_fini "__FILE__" ==========\n");
+#endif
+	if (!samplermod_data.isinit)
+		/* Someone allready did this in a more controlled way. Nothing to do
+		 * here, return */
+		 return;
 	self_destruct(samplermod_data.list);
-	samplermod_data.ptime = UINT_MAX;
-}
-
-/* Module private functions */
-int self_destruct(handle_t list) {
+	samplermod_data.isinit=0;
 }

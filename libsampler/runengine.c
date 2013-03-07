@@ -32,47 +32,14 @@
 /* Include module common stuff */
 #include "sampler.h"
 #include "sigstruct.h"
-
 #ifndef DBGLVL
-#define DBGLVL 2
+#define DBGLVL 0
 #endif
 
 #ifndef TESTSPEED
-#define TESTSPEED 3
+#define TESTSPEED 1
 #endif
-
-#if ( TESTSPEED == 3 )
-#  define SMALL      0
-#  define MEDIUM     0
-#  define LONG       0
-#elif ( TESTSPEED == 2 )
-#  define SMALL      10
-#  define MEDIUM     100
-#  define LONG       500
-#elif ( TESTSPEED == 1 )
-#  define SMALL      1000
-#  define MEDIUM     10000
-#  define LONG       50000
-#elif ( TESTSPEED == 0 )
-#  define SMALL      100000
-#  define MEDIUM     1000000
-#  define LONG       5000000
-#endif
-
-#if ( DBGLVL == 0 )
-#  define INFO( S ) ((void)0)
-#  define DUSLEEP( T ) ((void)0)
-#elif ( DBGLVL == 1 )
-#  define INFO( S )  printf S
-#  define DUSLEEP( U ) usleep( U )
-#elif ( DBGLVL == 2 )
-#  define INFO( S ) { printf S; fflush(stdout); }
-#  define DUSLEEP( U ) usleep( U )
-#elif ( DBGLVL == 3 )
-#  define eprintf(...) fprintf (stderr, __VA_ARGS__)
-#  define INFO( S ) eprintf S
-#  define DUSLEEP( U ) usleep( U )
-#endif
+#include "local.h"
 
 /* Counting semaphore, main synchronizer. Lock is taken once for each thread
  * and all are released at once by the master releasing it n-times
@@ -92,7 +59,7 @@ static int nworkers;
  * run, the poll_master dictates each run. */
 void *poll_worker_thread(void* inarg) {
 	struct sig_sub *signal = inarg;
-	struct sig_data *sigadmin = signal->ownr;
+	struct sig_data *sig_data = signal->ownr;
 	struct sig_def *sig_def = &(signal->ownr->ownr->sig_def);
 
 	while(1) {
@@ -120,9 +87,8 @@ void *poll_worker_thread(void* inarg) {
  * administers. It's responsible for keeping time of each sample, and to
  * jitter compensate if needed. */
 void *poll_master_thread(void* inarg) {
-	struct sig_data *sigadmin = inarg;
+	struct sig_data *sig_data = inarg;
 	int i;
-	unsigned long smplcntr=0;
 
 	while(1) {
 		/*Simulate sync*/
@@ -140,9 +106,9 @@ void *poll_master_thread(void* inarg) {
 		/* Wait for all to finish */
 		sem_wait(&end_barrier);
 
-		/* Record time, output sample, calculate jitter-factor*/
-		++smplcntr;
-		INFO(("<-- Master harvest sample nr#: %lu\n",smplcntr));
+		/* Harvest, record time, output sample, calculate jitter-factor*/
+		harvest_sample(sig_data);
+		INFO(("<-- Master harvest sample nr#: %lu\n",samplermod_data.smplcntr));
 		/* TBD */
 	}
 }
