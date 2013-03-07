@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include <unistd.h>
+#include <string.h>
 
 /* Include module common stuff */
 #include "sampler.h"
@@ -58,25 +59,29 @@ static int nworkers;
  * need to search and no concurrency aspects. It knows nothing about when to
  * run, the poll_master dictates each run. */
 void *poll_worker_thread(void* inarg) {
-	struct sig_sub *signal = inarg;
-	struct sig_data *sig_data = signal->ownr;
-	struct sig_def *sig_def = &(signal->ownr->ownr->sig_def);
+	struct sig_sub *sig_sub = inarg;
+	struct sig_data *sig_data = sig_sub->ownr;
+	struct sig_def *sig_def = &(sig_sub->ownr->ownr->sig_def);
 
 	while(1) {
 		INFO(("--> Worker %d starts (nr: %d for line %d)\n",
-					signal->id,
-					signal->sub_id,
+					sig_sub->id,
+					sig_sub->sub_id,
 					sig_def->id));
 
 		sem_post(&end_barrier);
 		sem_wait(&start_barrier); //Main sync point. Wait here.
-		INFO(("--> Worker %d in sync. Continues...\n",signal->id));
+		INFO(("--> Worker %d in sync. Continues...\n",sig_sub->id));
 		sem_wait(&end_barrier);    /* Will not block, just takes a token */
-		INFO(("--> Worker %d notified master...\n",signal->id));
+		INFO(("--> Worker %d notified master!\n",sig_sub->id));
 		pthread_mutex_unlock(&workers);    /* Tell master OK to continue */
-		INFO(("--> Running %d\n",signal->id));
+		INFO(("--> Running... %d\n",sig_sub->id));
 		DUSLEEP(MEDIUM);
-
+		{
+			/* Work goes here */
+			memset(sig_sub->val,0,VAL_STR_MAX);
+			snprintf(sig_sub->val,VAL_STR_MAX,"%d",random());
+		}
 		/*Tell master one more is finished*/
 		sem_post(&end_barrier);
 	}
@@ -89,6 +94,7 @@ void *poll_worker_thread(void* inarg) {
 void *poll_master_thread(void* inarg) {
 	struct sig_data *sig_data = inarg;
 	int i;
+	handle_t list = samplermod_data.list;
 
 	while(1) {
 		/*Simulate sync*/
@@ -107,7 +113,7 @@ void *poll_master_thread(void* inarg) {
 		sem_wait(&end_barrier);
 
 		/* Harvest, record time, output sample, calculate jitter-factor*/
-		harvest_sample(sig_data);
+		harvest_sample(list);
 		INFO(("<-- Master harvest sample nr#: %lu\n",samplermod_data.smplcntr));
 		/* TBD */
 	}
@@ -120,6 +126,8 @@ int create_executor(handle_t list) {
 	struct sig_data *sig_data;
 	struct smpl_signal *smpl_signal;
 
+	/* Store list for threads to pick-up */
+	samplermod_data.list = list;
 
 	/* Main sync-barrier. Start with no tokens, all workers will block
 	 * waiting for the master */

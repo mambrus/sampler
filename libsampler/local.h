@@ -33,7 +33,7 @@
 int parse_initfile(const char *fn, handle_t *list);
 int create_executor(handle_t list);
 int self_destruct(handle_t list);
-void harvest_sample(const struct sig_data *sig_data);
+void harvest_sample(const handle_t list);
 
 #ifndef DBGLVL
 #define DBGLVL 3

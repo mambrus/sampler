@@ -30,7 +30,7 @@ int sampler_init(const char *filename, int period) {
 	int rc;
 	handle_t list;
 
-	rc=parse_initfile(filename, &list); 
+	rc=parse_initfile(filename, &list);
 	/*TBD: Add better error-handling*/
 	assert(rc==0);
 

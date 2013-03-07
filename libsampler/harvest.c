@@ -74,32 +74,31 @@ static struct timeval tv_add( struct timeval t0, struct timeval t1 ) {
 	return tv;
 }
 
-int timeval_subtract (result, x, y)
-     struct timeval *result, *x, *y;
-{
-  /* Perform the carry for the later subtraction by updating y. */
-  if (x->tv_usec < y->tv_usec) {
-    int nsec = (y->tv_usec - x->tv_usec) / 1000000 + 1;
-    y->tv_usec -= 1000000 * nsec;
-    y->tv_sec += nsec;
-  }
-  if (x->tv_usec - y->tv_usec > 1000000) {
-    int nsec = (y->tv_usec - x->tv_usec) / 1000000;
-    y->tv_usec += 1000000 * nsec;
-    y->tv_sec -= nsec;
-  }
+static void collect_and_print(const handle_t list){
+	int rc,i,j;
+	struct node *n;
+	struct sig_sub *sig_sub;
+	struct sig_data *sig_data;
+	struct smpl_signal *smpl_signal;
 
-  /* Compute the time remaining to wait.
-     tv_usec is certainly positive. */
-  result->tv_sec = x->tv_sec - y->tv_sec;
-  result->tv_usec = x->tv_usec - y->tv_usec;
+	for(n=mlist_head(list); n; n=mlist_next(list)){
+		assert(n->pl);
 
-  /* Return 1 if result is negative. */
-  return x->tv_sec < y->tv_sec;
+		smpl_signal=(struct smpl_signal *)(n->pl);
+		sig_data=&((*smpl_signal).sig_data);
+		for(j=0; j<sig_data->nsigs; j++){
+			sig_sub=&((sig_data->sigs)[j]);
+			sig_sub->val[VAL_STR_MAX] = 0;
+			fputc(';',stdout);
+			fputs(sig_sub->val,stdout);
+		}
+	}
+	fputc('\n',stdout);
+	//fflush(stdout);
 }
 
 /* Harvest finished sample and print it */
-void harvest_sample(const struct sig_data *sig_data){
+void harvest_sample(const handle_t list){
 		static struct timeval tlast = {0,0};
 		static int first = 1;
 		struct timeval tnow1,tnow2;
@@ -115,9 +114,10 @@ void harvest_sample(const struct sig_data *sig_data){
 
 		tdiff=tv_diff(tlast,tnow1);
 
-		printf("%d.%06d;%d.%06d\n",
+		printf("%d.%06d;%d.%06d",
 			SEC(tnow1),USEC(tnow1),SEC(tdiff),USEC(tdiff));
 
+		collect_and_print(list);
 		++samplermod_data.smplcntr;
 
 		gettimeofday(&tnow2, NULL);
@@ -133,12 +133,12 @@ void harvest_sample(const struct sig_data *sig_data){
 			uComp = 1000000 - uComp;
 
 		tlast = tnow2;
-		assert(uComp<samplermod_data.ptime);
+		//assert(uComp<samplermod_data.ptime);
 		if (uComp>=samplermod_data.ptime) {
-#ifndef never
-/* Don't warn. Disturbs time even more */
+#ifdef never
+			/* Don't warn. Disturbs time even more */
 			fprintf(stderr,"Cant compensate jitter: %d us (%d.%05d)\n",
-					uComp,SEC(tdiff),USEC(tdiff));
+			uComp,SEC(tdiff),USEC(tdiff));
 #endif
 			uComp=0;
 		}
