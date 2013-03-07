@@ -35,42 +35,33 @@
  * be more than enough) */
 #define VAL_STR_MAX 25
 
-/* Bit-values defining data-file handling. Note tha the final value 0 (i.e.
- * no bit set) has a special meaning and can't be "OR":ed to be compared 
- * only be compared with 0 */
-#define NOASSUMPTION    ((uint64_t)0<<0)  /* Best effort. Try to reopen if
-											 not existing.*/ 
+/* Bit-values defining data-file operation per signal. Note that the final
+value 0 (i.e.  * no bit set) has a special meaning and can't be "OR":ed to be
+compared * only be compared with 0 */
 
-#define OPENCLOSE       ((uint64_t)1<<1)  /* Sampler will always close after
-											 read and reopen prior next
-											 read. Useful for files (normal
-											 data-files) that might have
-											 been renamed like normal
-											 log-files.*/
+/* Best effort. Try to reopen if not existing.*/
+#define NOASSUMPTION    ((uint64_t)0<<0)
 
-#define CANBLOCK        ((uint64_t)1<<2)  /* File can block. For even-driven
-											 sampling this is one possible
-											 trigger.  I.e. one file getting
-											 ready to deliver drivers the
-											 event even if files that can't
-											 block gets read. In such case
-											 whether or not data gets
-											 delivered depends on if the
-											 file has support or utime. If
-											 more than one blocking files
-											 are part of a configuration,
-											 the ones still blocked will not
-											 be asked to deliver data. */
+/* Sampler will always close after read and reopen prior next read. Useful for
+files (normal data-files) that might have been renamed like normal log-files.*/
+#define OPENCLOSE       ((uint64_t)1<<0)
 
-#define ALWAYS          ((uint64_t)1<<31)  /*File must exist and always
-											 deliver data. Failure doing so
-											 terminates execution */
+/* File can block. For even-driven sampling this is one possible trigger.  I.e.
+one file getting ready to deliver drivers the event even if files that can't
+block gets read. In such case whether or not data gets delivered depends on if
+the file has support or utime. If more than one blocking files are part of a
+configuration, the ones still blocked will not be asked to deliver data. */
+#define CANBLOCK        ((uint64_t)1<<1)
+
+/*File must exist and always deliver data. Failure doing so terminates
+execution */
+#define ALWAYS          ((uint64_t)1<<31)
 
 /* Enumeration to help determine combination of blocking state. Mostly not
  * useful and entries night be missing, but has it's usefulness when
  * debugging */
 enum persist {
-	auto              = NOASSUMPTION,
+	automagic         = NOASSUMPTION,
 	notpersistent     = OPENCLOSE,
 	eventdriver       = CANBLOCK,
 	canblock          = CANBLOCK |  OPENCLOSE,
@@ -79,8 +70,27 @@ enum persist {
 							  them self are still interpreted and limited to
 							  "int")*/
 };
-/* Hmm, above this is probably crap. Would be better with a union of 1-bit
- * bit-field structs. */
+/* Hmm, above this is probably a crappy attempt and would scale enormously
+badly if covering more than a few bits.*/
+
+/* Calling "persistence" for file-operation mode instead as it's more generic*/
+union fopmode {
+	uint32_t	mask; /* Clean access, works always */
+
+	/* Bits below should be used for debugging purposes. Should be
+	 * endian-ness OK as we are only working with 1 bit at a time. AFAIK
+	 * there is no guarantee to avoid gaps and members are always considered
+	 * "int" no matter of the element size. This is no big deal as code will
+	 * not work on cross-platform data (i.e. could had chosen full scale
+	 * data-types but I like the concept of bit-masks and this is a way to
+	 * combine them	 */
+	struct {
+		uint32_t openclose  : 1;
+		uint32_t canblock   : 1;
+		uint32_t __pad1     : 29;
+		uint32_t always     : 1;
+	} __attribute__((__packed__,aligned (4))) bits;
+};
 
 struct regexp {
 	char *str;			/* The string originally describing the regex. Note:
@@ -97,7 +107,7 @@ struct sig_def {
 	char *name;				/* Signal name (symbolic) */
 	char *fname;			/* Signal name from file */
 	char *fdata;			/* Data-file name */
-	enum persist persist;	/* Datafile persistence */
+	union fopmode fopmode;	/* Datafile op-mode (sub-signals shares this)*/
 	struct regexp rgx_line;	/* Regex identifying line to parse */
 	struct regexp rgx_sig;	/* Signal regex */
 	int  *idxs;				/* Sub-match index */
@@ -117,8 +127,10 @@ struct sig_def {
 /* Sub-signal. A signal can have several sub-signal, but always has at
  * at least one */
 struct sig_sub {
-	struct sig_data *belong;/* Pointer back to the owner */
-	int nr_sig;				/* Which sub-signal this this (if sub-signals
+	struct sig_data *ownr;  /* Pointer back to the owner */
+	int id;                 /* "ID" of the signal. I.e which column it
+							   updates in the output. */
+	int sub_id;				/* Which sub-signal this this (if sub-signals
 							   defined). 0 if no sub-signals */
 	char val[VAL_STR_MAX];  /* Read value */
 	pthread_t worker;		/* Worker thread */
@@ -134,6 +146,7 @@ struct sig_sub {
 /* Structure containing data to be harvested on each iteration */
 struct sig_data {
 	int fd;					/* File descriptor of the data-file */
+	struct smpl_signal *ownr; /* Pointer back to the owner */
 	int nsigs;				/* Number of sub-signals */
 	struct sig_sub *sigs;	/* Array of sub-signals. Note: sub_sig is of fixed
 							   size. If this change, this table must be converted
@@ -141,7 +154,7 @@ struct sig_data {
 	pthread_t master;		/* Master thread (if master/worker model is used)*/
 };
 
-/* One compile signal. Might be missing pthread owning signal to make killing
+/* One complete signal. Might be missing pthread owning signal to make killing
  * easier by main thread just parsing data (TBD) */
 struct smpl_signal {
 	struct sig_def sig_def;

@@ -28,6 +28,7 @@
 #include <time.h>
 #include <errno.h>
 #include <assert.h>
+#include <limits.h>
 
 /* Local definitions */
 #include "local.h"
@@ -68,6 +69,15 @@ $"
 /* Max number of sub-signals. Just a number for sanity-checks really */
 #define MAX_SUBSIGS 10
 
+/* Max number of signals. A number for sanity-checks really, but also the
+   offset for signal ID:s (i.e. the unique number each sample thread has).
+   Nice and even 10-base number for debugging ease */
+#define MAX_SIGS 1000
+
+#if (!(MAX_SUBSIGS < (MAX_SIGS-1)))
+#error Impossible MAX_SUBSIGS & MAX_SIGS values
+#endif
+
 static int sigdef_compare(LDATA *lval, LDATA *rval);
 
 /* Takes one line describing a sample-signal and make a signal scruct of it.
@@ -102,7 +112,17 @@ static int parse_dfn_line(const regex_t *preg, char *line, struct smpl_signal *r
 	rsig->sig_def.name			= strdup(&(line[mtch_idxs[SNAME].rm_so]));
 	rsig->sig_def.fname			= strdup(&(line[mtch_idxs[SFNAME].rm_so]));
 	rsig->sig_def.fdata			= strdup(&(line[mtch_idxs[SFDATA].rm_so]));
-	rsig->sig_def.persist		= atoi(&(line[mtch_idxs[SPERS].rm_so]));
+	rsig->sig_def.fopmode.mask	= atoi(&(line[mtch_idxs[SPERS].rm_so]));
+
+	printf("Size of fopmode: %d\nFile operation bits:\n"
+			"   openclose:%d\n"
+			"   canblock:%d\n"
+			"   always:%d\n",
+			sizeof(union fopmode),
+			rsig->sig_def.fopmode.bits.openclose,
+			rsig->sig_def.fopmode.bits.canblock,
+			rsig->sig_def.fopmode.bits.always
+	);
 
 	/*Parse the line identifier regex*/
 	rsig->sig_def.rgx_line.str	= strdup(&(line[mtch_idxs[SRGXL].rm_so]));
@@ -145,10 +165,12 @@ static int parse_dfn_line(const regex_t *preg, char *line, struct smpl_signal *r
 		assert(rsig->sig_def.idxs);
 		(rsig->sig_def.idxs)[0]			= 0;
 		rsig->sig_data.nsigs			= 1;
+		rsig->sig_data.ownr				= rsig;
 		rsig->sig_data.sigs				= calloc(1, sizeof(struct sig_sub));
 		assert(rsig->sig_data.sigs);
-		(rsig->sig_data.sigs)[0].belong	= &rsig->sig_data;
-		(rsig->sig_data.sigs)[0].nr_sig = 0;
+		(rsig->sig_data.sigs)[0].ownr	= &rsig->sig_data;
+		(rsig->sig_data.sigs)[0].sub_id = 0;
+		(rsig->sig_data.sigs)[0].id     = MAX_SIGS * (lno+1);
 	} else {
 		/* Parse the sub-signals string. */
 		int instr=0;
@@ -171,14 +193,23 @@ static int parse_dfn_line(const regex_t *preg, char *line, struct smpl_signal *r
 		}
 
 		rsig->sig_data.nsigs = nidx;
+		rsig->sig_data.ownr = rsig;
 		rsig->sig_def.idxs = calloc(nidx, sizeof(int));
 		memset(rsig->sig_def.idxs, 0, nidx*sizeof(int));
 		rsig->sig_data.sigs	= calloc(nidx, sizeof(struct sig_sub));
 		assert(rsig->sig_data.sigs);
-		memset(rsig->sig_def.idxs, 0, nidx*sizeof(struct sig_sub));
+		memset(rsig->sig_data.sigs, 0, nidx*sizeof(struct sig_sub));
+
+		/* Initialize sub-signal data harvester (data for each work-thread) */
+		for (i=0; i<nidx; i++){
+			(rsig->sig_data.sigs)[i].ownr	= &rsig->sig_data;
+			(rsig->sig_data.sigs)[i].sub_id = i;
+			(rsig->sig_data.sigs)[i].id     = MAX_SIGS * (lno+1) + i;
+		}
 
 		tptr=sptr;
 
+		/* Store sub-match index */
 		for (instr=0,i=0,j=0; i<len; i++) {
 			if (tptr[i] >= '0' && tptr[i] <= '9') {
 				if (!instr) {

@@ -33,6 +33,47 @@
 #include "sampler.h"
 #include "sigstruct.h"
 
+#ifndef DBGLVL
+#define DBGLVL 2
+#endif
+
+#ifndef TESTSPEED
+#define TESTSPEED 3
+#endif
+
+#if ( TESTSPEED == 3 )
+#  define SMALL      0
+#  define MEDIUM     0
+#  define LONG       0
+#elif ( TESTSPEED == 2 )
+#  define SMALL      10
+#  define MEDIUM     100
+#  define LONG       500
+#elif ( TESTSPEED == 1 )
+#  define SMALL      1000
+#  define MEDIUM     10000
+#  define LONG       50000
+#elif ( TESTSPEED == 0 )
+#  define SMALL      100000
+#  define MEDIUM     1000000
+#  define LONG       5000000
+#endif
+
+#if ( DBGLVL == 0 )
+#  define INFO( S ) ((void)0)
+#  define DUSLEEP( T ) ((void)0)
+#elif ( DBGLVL == 1 )
+#  define INFO( S )  printf S
+#  define DUSLEEP( U ) usleep( U )
+#elif ( DBGLVL == 2 )
+#  define INFO( S ) { printf S; fflush(stdout); }
+#  define DUSLEEP( U ) usleep( U )
+#elif ( DBGLVL == 3 )
+#  define eprintf(...) fprintf (stderr, __VA_ARGS__)
+#  define INFO( S ) eprintf S
+#  define DUSLEEP( U ) usleep( U )
+#endif
+
 /* Counting semaphore, main synchronizer. Lock is taken once for each thread
  * and all are released at once by the master releasing it n-times
  * simultaneously */
@@ -43,97 +84,130 @@ static sem_t end_barrier;
  * one thread has started and counting end-barrier is taken.*/
 static pthread_mutex_t workers = PTHREAD_MUTEX_INITIALIZER;
 
+/* Number of workers (we don't have a sample struct yet, therefore global)*/
+static int nworkers;
+
 /* Simple worker thread. As in-data it takes it's own list-slot (i.e. no
  * need to search and no concurrency aspects. It knows nothing about when to
  * run, the poll_master dictates each run. */
 void *poll_worker_thread(void* inarg) {
 	struct sig_sub *signal = inarg;
-	struct sig_data *sigadmin = signal->belong;
+	struct sig_data *sigadmin = signal->ownr;
+	struct sig_def *sig_def = &(signal->ownr->ownr->sig_def);
 
 	while(1) {
-		sem_wait(&start_barrier);
+		INFO(("--> Worker %d starts (nr: %d for line %d)\n",
+					signal->id,
+					signal->sub_id,
+					sig_def->id));
+
+		sem_post(&end_barrier);
+		sem_wait(&start_barrier); //Main sync point. Wait here.
+		INFO(("--> Worker %d in sync. Continues...\n",signal->id));
 		sem_wait(&end_barrier);    /* Will not block, just takes a token */
+		INFO(("--> Worker %d notified master...\n",signal->id));
 		pthread_mutex_unlock(&workers);    /* Tell master OK to continue */
-		printf("Running %d\n",signal->nr_sig);
+		INFO(("--> Running %d\n",signal->id));
+		DUSLEEP(MEDIUM);
 
 		/*Tell master one more is finished*/
 		sem_post(&end_barrier);
 	}
 }
 
-/* Simple poll master. It tells when it's group of workers should run my
+/* Simple poll master. It tells when it's group of workers should run by
  * releasing a semaphore periodically according to period time it
  * administers. It's responsible for keeping time of each sample, and to
  * jitter compensate if needed. */
 void *poll_master_thread(void* inarg) {
 	struct sig_data *sigadmin = inarg;
 	int i;
+	unsigned long smplcntr=0;
 
 	while(1) {
+		/*Simulate sync*/
+		DUSLEEP(MEDIUM);
 		/* Tell all workers go!*/
-		for(i=0; i<sigadmin->nsigs; i++) sem_post(&start_barrier);
-		pthread_mutex_lock(&workers); /* Wait for one worker to start */
-		printf("Master has released %d workers\n",sigadmin->nsigs);
+		INFO(("<-- Master sync. Will release %d workers\n",nworkers));
+		for(i=0; i<nworkers; i++) sem_post(&start_barrier);
+		INFO(("<-- Master has released %d workers\n",nworkers));
+		pthread_mutex_lock(&workers); /* Wait for at least one worker to
+										 start. That way we know "GO!" has
+										 been heard and acted upon*/
+		INFO(("<-- Master continues...\n",nworkers));
+		DUSLEEP(LONG);
 
 		/* Wait for all to finish */
 		sem_wait(&end_barrier);
 
 		/* Record time, output sample, calculate jitter-factor*/
+		++smplcntr;
+		INFO(("<-- Master harvest sample nr#: %lu\n",smplcntr));
 		/* TBD */
 	}
 }
 
 int create_executor(handle_t list) {
 	int rc,i,j;
-	volatile int k=0;
 	struct node *n;
-	struct sig_sub *signal;
-	struct sig_data *sigadmin;
-	struct smpl_signal *sample;
+	struct sig_sub *sig_sub;
+	struct sig_data *sig_data;
+	struct smpl_signal *smpl_signal;
 
-	/* stub this for now. Just glue together to get compiler to check for
-	 * missing dependencies. What's missing is a implemented list. Remove
-	 * ASAP or when better stub is available */
-	//return(0);
 
-	rc=sem_init(&start_barrier, 0, 0); /*Start with no tokens, all workers
-										 will block waiting for the master*/
-	assert(rc==0);
-	rc=sem_init(&end_barrier, 0, 0);   /*Start with no tokens. Worker must
-										 take tokens */
-	assert(rc==0);
-	rc=pthread_mutex_lock(&workers);    /*Make sure Master blocks */
+	/* Main sync-barrier. Start with no tokens, all workers will block
+	 * waiting for the master */
+	rc=sem_init(&start_barrier, 0, 0);
 	assert(rc==0);
 
-	/* Create a worker-thread for each sub-signal */
+	/* Init with 0. Workers posts +1 on each runs start. Worker must take
+	 * token and will block until all threads have reached end-barrier. This
+	 * is what makes the lock-step work.*/
+	rc=sem_init(&end_barrier, 0, 0);
+	assert(rc==0);
+
+	/* Make sure Master blocks. This is to avoid master having a chance to
+	 * race against the end-border if it for some reason would get to start
+	 * first time before any worker. It's very unlikely to happen and the
+	 * extra sync point costs time. Thinking about to remove it, worst that
+	 * can happen is that lock-step gets disfunct the first 1-2 samples. */
+	rc=pthread_mutex_lock(&workers);
+	assert(rc==0);
+
+	/* Create a worker-threads, one for each sub-signal */
 	for(n=mlist_head(list); n; n=mlist_next(list)){
 		assert(n->pl);
 
-		sample=(struct smpl_signal *)(n->pl);
-		sigadmin=&((*sample).sig_data);
-		for(j=0; j<sigadmin->nsigs; j++){
-			signal=&((sigadmin->sigs)[j]);
+		smpl_signal=(struct smpl_signal *)(n->pl);
+		sig_data=&((*smpl_signal).sig_data);
+		for(j=0; j<sig_data->nsigs; j++){
+			sig_sub=&((sig_data->sigs)[j]);
+			INFO(("*** Starting worker %d (nr: %d for line %d)\n",
+					sig_sub->id,
+					sig_sub->sub_id,
+					sig_sub->ownr->ownr->sig_def.id));
+
 			rc=pthread_create(
-				&signal->worker,  
-				NULL, 
-				poll_worker_thread, 
-				signal
+				&sig_sub->worker,
+				NULL,
+				poll_worker_thread,
+				sig_sub
 			);
 			assert(rc==0);
-			assert(k++<100); //Sanity-check,
+			assert(nworkers++<100); //Sanity-check,
 		}
 	}
 
 	rc=pthread_create(
-		&sigadmin->master,  
-		NULL, 
-		poll_master_thread, 
-		sigadmin
+		&sig_data->master,
+		NULL,
+		poll_master_thread,
+		sig_data
 	);
 	assert(rc==0);
-	while(1){ 
-	/* Really should joint the threads. But good for now. Root thread will
-	handle stdin, whilst poll_master_thread  handles output.*/
-		usleep(1000000);
+	while(1){
+		/* Really should joint the threads. But good for now. Root thread
+		 * will handle stdin, whilst poll_master_thread  handles output.*/
+		DUSLEEP(MEDIUM);
 	}
 }
