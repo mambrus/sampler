@@ -124,6 +124,10 @@ struct sig_def {
 #define SRGXS	6 /* Signal regex                                         */
 #define SIDXS	7 /* Sub-match index                                      */
 
+/* Constant string to use as default output if no update has occurred. To be
+ * set specifically to help debug race conditions or other harvest errors*/
+#define SIG_VAL_DFLT "VALUE_UNDEFINED"
+
 /* Sub-signal. A signal can have several sub-signal, but always has at
  * at least one */
 struct sig_sub {
@@ -133,6 +137,7 @@ struct sig_sub {
 	int sub_id;				/* Which sub-signal this this (if sub-signals
 							   defined). 0 if no sub-signals */
 	char val[VAL_STR_MAX];  /* Read value */
+	char presetval[VAL_STR_MAX]; /* What to print in case needed */
 	pthread_t worker;		/* Worker thread */
 	struct timeval rtime;	/* Time-stamp of last time read. Note: this field
 							   only used if needed (i.e. non fixed-rate

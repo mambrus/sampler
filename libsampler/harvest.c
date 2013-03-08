@@ -25,6 +25,7 @@
 #include <time.h>
 #include <sys/times.h>
 #include <stdint.h>
+#include <string.h>
 
 /* Include module common stuff */
 #include "sampler.h"
@@ -74,6 +75,42 @@ static struct timeval tv_add( struct timeval t0, struct timeval t1 ) {
 	return tv;
 }
 
+/* Output in format according to settings */
+void output(int cid, const char *val) {
+	switch (samplermod_data.plotmode) {
+		case driveGnuPlot:
+			fputc('0'+cid+samplermod_data.cid_offs,stdout);
+			fputc(':',stdout);
+			fputs(val,stdout);
+			fputc('\n',stdout);
+			break;
+		case feedgnuplot:
+		default:
+			fputc(samplermod_data.delimiter,stdout);
+			fputs(val,stdout);
+	}
+}
+
+/* What to do if isn't updated. Both drivegnuplot and feedgnuplot currently
+ * get their streams confused and we in such case we need to output
+ * something */
+static void ondataempty(int cid, const struct sig_sub* sig_sub) {
+	switch (samplermod_data.whatTodo) {
+		case Lastval:
+			output(cid, sig_sub->val);
+			break;
+		case PresetSigStr:
+			output(cid, sig_sub->presetval);
+			break;
+		case PresetSmplStr:
+			output(cid, samplermod_data.presetval);
+			break;
+		case Nothing:
+		cefault:
+			output(cid, "");
+	}
+}
+
 static void collect_and_print(const handle_t list){
 	int rc,i,j;
 	struct node *n;
@@ -88,17 +125,23 @@ static void collect_and_print(const handle_t list){
 		sig_data=&((*smpl_signal).sig_data);
 		for(j=0; j<sig_data->nsigs; j++){
 			sig_sub=&((sig_data->sigs)[j]);
-			sig_sub->val[VAL_STR_MAX] = 0;
-			fputc(';',stdout);
-			fputs(sig_sub->val,stdout);
+			sig_sub->val[VAL_STR_MAX-1] = '\0';
+			if (sig_sub->is_updated) {
+				output(j, sig_sub->val);
+			} else {
+				ondataempty(j,sig_sub);
+			}
+			sig_sub->is_updated=0;
 		}
 	}
-	fputc('\n',stdout);
-	//fflush(stdout);
+	if (!samplermod_data.plotmode == driveGnuPlot) {
+		fputc('\n',stdout);
+	}
+	fflush(stdout);
 }
 
 /* Harvest finished sample and print it */
-void harvest_sample(const handle_t list){
+void harvest_sample(const handle_t list) {
 		static struct timeval tlast = {0,0};
 		static int first = 1;
 		struct timeval tnow1,tnow2;
@@ -113,9 +156,15 @@ void harvest_sample(const handle_t list){
 		}
 
 		tdiff=tv_diff(tlast,tnow1);
-
-		printf("%d.%06d;%d.%06d",
-			SEC(tnow1),USEC(tnow1),SEC(tdiff),USEC(tdiff));
+		if (samplermod_data.plotmode == driveGnuPlot) {
+			printf("0:%d.%06d\n1:%d.%06d\n",
+				SEC(tnow1),USEC(tnow1),SEC(tdiff),USEC(tdiff));
+		} else {
+			printf("%d.%06d%c%d.%06d",
+				SEC(tnow1),USEC(tnow1),
+				samplermod_data.delimiter,
+				SEC(tdiff),USEC(tdiff));
+		}
 
 		collect_and_print(list);
 		++samplermod_data.smplcntr;
@@ -142,6 +191,6 @@ void harvest_sample(const handle_t list){
 #endif
 			uComp=0;
 		}
-		usleep(samplermod_data.ptime-uComp);
+		usleep(samplermod_data.ptime/*-uComp*/);
 }
 

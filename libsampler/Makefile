@@ -13,6 +13,7 @@ LOCAL_SRC_FILESS := \
 
 LOCAL_LIBS := \
     pthread \
+	m \
     mlist
 
 LOCAL_CFLAGS :=

@@ -94,13 +94,35 @@ void harvest_sample(const handle_t list);
 #error bad value of TESTSPEED
 #endif
 
+enum plotmode {
+	feedgnuplot = 0,		/* Standard one-line output */
+	driveGnuPlot = 1        /* i.e. driveGnuPlotStreams */
+};
+
+/* What to do if worker hasn't updated data due to that it's blocked (if
+ * that is allowed for the thread i.e.) or it has detected the data is
+ * unchanged (polling with detectable timestamps)*/
+enum whatTodo {
+	/*Output...: */
+	Nothing = 0,
+	Lastval,
+	PresetSigStr,
+	PresetSmplStr
+};
+
 struct samplermod_struct {
 	int isinit;
 	handle_t list;
-	int ptime;          //Period time in us (Max: 4294/2=2147s = 35min)
+	int ptime;              /* Period time in us (Max: 4294/2=2147s
+							   = 35min) */
 	uint64_t smplcntr;
-
+	enum plotmode plotmode;
+	char delimiter;
+	enum whatTodo whatTodo;
+	int cid_offs;
+	char presetval[VAL_STR_MAX]; /* What to print in case is needed */
 };
+
 extern struct samplermod_struct samplermod_data;
 
 #endif /* local_h */

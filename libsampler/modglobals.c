@@ -29,4 +29,10 @@ struct samplermod_struct samplermod_data = {
 	.list = 0,
 	.ptime = -1,
 	.smplcntr = UINT64_MAX,
+	.plotmode = driveGnuPlot,
+	.presetval = "0",
+	.cid_offs = 2,
+	.delimiter = ';', .whatTodo = PresetSigStr,/*Always Output something:
+												 feedgnuplot compatible
+												 and error detectable */
 };

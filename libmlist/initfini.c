@@ -31,7 +31,7 @@
 /* Module initializers */
 void __init mlist_init(void) {
 #ifndef NDEBUG
-	printf("==========_init==========\n");
+	fprintf(stderr,"==========_init==========\n");
 #endif
 	assert(!mlistmod_data.isinit);
 	mlistmod_data.nlists = 0,
@@ -43,7 +43,7 @@ void __init mlist_init(void) {
 void __fini mlist_fini(void) {
 	struct node *tnext;   /* Needed because race could happen */
 #ifndef NDEBUG
-	printf("==========_fini==========\n");
+	fprintf(stderr,"==========_fini==========\n");
 #endif
 	assert(mlistmod_data.isinit);
 	/* Destroy all lists if not already done. Note: will not take care of

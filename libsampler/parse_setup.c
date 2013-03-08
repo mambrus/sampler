@@ -105,7 +105,7 @@ static int parse_dfn_line(const regex_t *preg, char *line, struct smpl_signal *r
 	 * Note that index=0 matches the compete pattern. I.e. add +1 */
 	for (i=1; i<=MAX_DFN_COLUMNS; i++) {
 		line[mtch_idxs[i].rm_eo]=0;
-		printf("%02d: %s\n", i, &(line[mtch_idxs[i].rm_so]));
+		fprintf(stderr,"%02d: %s\n", i, &(line[mtch_idxs[i].rm_so]));
 	}
 
 	rsig->sig_def.id			= lno;
@@ -114,7 +114,7 @@ static int parse_dfn_line(const regex_t *preg, char *line, struct smpl_signal *r
 	rsig->sig_def.fdata			= strdup(&(line[mtch_idxs[SFDATA].rm_so]));
 	rsig->sig_def.fopmode.mask	= atoi(&(line[mtch_idxs[SPERS].rm_so]));
 
-	printf("Size of fopmode: %d\nFile operation bits:\n"
+	fprintf(stderr,"Size of fopmode: %d\nFile operation bits:\n"
 			"   openclose:%d\n"
 			"   canblock:%d\n"
 			"   always:%d\n",
@@ -171,6 +171,8 @@ static int parse_dfn_line(const regex_t *preg, char *line, struct smpl_signal *r
 		(rsig->sig_data.sigs)[0].ownr	= &rsig->sig_data;
 		(rsig->sig_data.sigs)[0].sub_id = 0;
 		(rsig->sig_data.sigs)[0].id     = MAX_SIGS * (lno+1);
+		snprintf( (rsig->sig_data.sigs)[0].presetval, VAL_STR_MAX, 
+			"%s %d", SIG_VAL_DFLT,(rsig->sig_data.sigs)[0].id);
 	} else {
 		/* Parse the sub-signals string. */
 		int instr=0;
@@ -205,6 +207,8 @@ static int parse_dfn_line(const regex_t *preg, char *line, struct smpl_signal *r
 			(rsig->sig_data.sigs)[i].ownr	= &rsig->sig_data;
 			(rsig->sig_data.sigs)[i].sub_id = i;
 			(rsig->sig_data.sigs)[i].id     = MAX_SIGS * (lno+1) + i;
+			snprintf( (rsig->sig_data.sigs)[i].presetval, VAL_STR_MAX, 
+				"%s %d", SIG_VAL_DFLT,(rsig->sig_data.sigs)[i].id);
 		}
 
 		tptr=sptr;

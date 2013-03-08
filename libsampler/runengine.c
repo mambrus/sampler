@@ -29,6 +29,7 @@
 #include <assert.h>
 #include <unistd.h>
 #include <string.h>
+#include <math.h>
 
 /* Include module common stuff */
 #include "sampler.h"
@@ -38,7 +39,7 @@
 #endif
 
 #ifndef TESTSPEED
-#define TESTSPEED 1
+#define TESTSPEED 5
 #endif
 #include "local.h"
 
@@ -77,11 +78,20 @@ void *poll_worker_thread(void* inarg) {
 		pthread_mutex_unlock(&workers);    /* Tell master OK to continue */
 		INFO(("--> Running... %d\n",sig_sub->id));
 		DUSLEEP(MEDIUM);
+		/* Clear last value */
+		memset(sig_sub->val,0,VAL_STR_MAX);
 		{
 			/* Work goes here */
-			memset(sig_sub->val,0,VAL_STR_MAX);
-			snprintf(sig_sub->val,VAL_STR_MAX,"%d",random());
+			float x;
+
+			x=(samplermod_data.smplcntr/100.0)*2.0*3.1415;
+			if (sig_sub->id == 2 && samplermod_data.smplcntr==30) {
+				//sleep(200);
+			}
+			sig_sub->rtime.tv_sec=sig_sub->id;
+			snprintf(sig_sub->val,VAL_STR_MAX,"%f",sin(x));
 		}
+		sig_sub->is_updated=1;
 		/*Tell master one more is finished*/
 		sem_post(&end_barrier);
 	}
@@ -114,7 +124,7 @@ void *poll_master_thread(void* inarg) {
 
 		/* Harvest, record time, output sample, calculate jitter-factor*/
 		harvest_sample(list);
-		INFO(("<-- Master harvest sample nr#: %lu\n",samplermod_data.smplcntr));
+		INFO(("<-- Master harvest sample nr#: %llu\n",samplermod_data.smplcntr));
 		/* TBD */
 	}
 }

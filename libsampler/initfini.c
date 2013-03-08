@@ -33,7 +33,7 @@
  */
 void __init __sampler_init(void) {
 #ifndef NDEBUG
-	printf("==========_init  "__FILE__"==========\n");
+	fprintf(stderr,"==========_init  "__FILE__"==========\n");
 #endif
 	assert(!samplermod_data.isinit);
 	samplermod_data.smplcntr=0;
@@ -43,7 +43,7 @@ void __init __sampler_init(void) {
 
 void __fini __sampler_fini(void) {
 #ifndef NDEBUG
-	printf("==========_fini "__FILE__" ==========\n");
+	fprintf(stderr,"==========_fini "__FILE__" ==========\n");
 #endif
 	if (!samplermod_data.isinit)
 		/* Someone allready did this in a more controlled way. Nothing to do
