@@ -76,18 +76,41 @@ static struct timeval tv_add( struct timeval t0, struct timeval t1 ) {
 }
 
 /* Output in format according to settings */
-void output(int cid, const char *val) {
+void output(int cid, const char *val, int always ) {
+	int wa = 0;
+	static const char *fakeval = "0";
+	const char *v = val;
+	volatile static int face_cntr = 0;
+	volatile static int wut_cntr = 0;
+
+	face_cntr++;;
+	wut_cntr++;;
+	if ( always && !(val[0]>='-' && val[0]<='z') ){
+		if (always != 1) {
+			fprintf(stderr, "ERROR: must print but have nothing"
+				" to fall-back on. Faking it... %d:%d\n",face_cntr,cid);
+		/* This is a clear error indication of the framework, but don't
+		 * assert for now as it else makes it even harder to see and debug
+		 * with feedgnuplot */
+		} else {
+			fprintf(stderr, "ERROR: Wut had you been smoking when you wrote "
+				"["__FILE__"] !!!? [%d:%d]\n",wut_cntr,cid);
+		/* Impossible combo */
+		}
+		wa = 1;
+		v = fakeval;
+	}
 	switch (samplermod_data.plotmode) {
 		case driveGnuPlot:
 			fputc('0'+cid+samplermod_data.cid_offs,stdout);
 			fputc(':',stdout);
-			fputs(val,stdout);
+			fputs(v,stdout);
 			fputc('\n',stdout);
 			break;
 		case feedgnuplot:
 		default:
 			fputc(samplermod_data.delimiter,stdout);
-			fputs(val,stdout);
+			fputs(v,stdout);
 	}
 }
 
@@ -97,17 +120,17 @@ void output(int cid, const char *val) {
 static void ondataempty(int cid, const struct sig_sub* sig_sub) {
 	switch (samplermod_data.whatTodo) {
 		case Lastval:
-			output(cid, sig_sub->val);
+			output(cid, sig_sub->val ,1);
 			break;
 		case PresetSigStr:
-			output(cid, sig_sub->presetval);
+			output(cid, sig_sub->presetval, 1);
 			break;
 		case PresetSmplStr:
-			output(cid, samplermod_data.presetval);
+			output(cid, samplermod_data.presetval ,1);
 			break;
 		case Nothing:
 		cefault:
-			output(cid, "");
+			output(cid, "", 0);
 	}
 }
 
@@ -127,7 +150,7 @@ static void collect_and_print(const handle_t list){
 			sig_sub=&((sig_data->sigs)[j]);
 			sig_sub->val[VAL_STR_MAX-1] = '\0';
 			if (sig_sub->is_updated) {
-				output(j, sig_sub->val);
+				output(j, sig_sub->val, 2);
 			} else {
 				ondataempty(j,sig_sub);
 			}

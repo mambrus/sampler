@@ -63,6 +63,10 @@ void *poll_worker_thread(void* inarg) {
 	struct sig_sub *sig_sub = inarg;
 	struct sig_data *sig_data = sig_sub->ownr;
 	struct sig_def *sig_def = &(sig_sub->ownr->ownr->sig_def);
+	int   loop_cntr = 0;
+	float fakt = 100.0*1000000.0/(float)samplermod_data.ptime;
+	memset(sig_sub->val,0,VAL_STR_MAX);
+	snprintf(sig_sub->val,VAL_STR_MAX,"%d",0);
 
 	while(1) {
 		INFO(("--> Worker %d starts (nr: %d for line %d)\n",
@@ -84,7 +88,8 @@ void *poll_worker_thread(void* inarg) {
 			/* Work goes here */
 			float x;
 
-			x=(samplermod_data.smplcntr/100.0)*2.0*3.1415;
+			x=(loop_cntr/fakt/*100.0*/)*2.0*3.1415;
+			loop_cntr++;
 			if (sig_sub->id == 2 && samplermod_data.smplcntr==30) {
 				//sleep(200);
 			}
