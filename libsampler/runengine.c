@@ -27,6 +27,7 @@
 #include <mlist.h>
 #include <stdio.h>
 #include <assert.h>
+#include "assert_np.h"
 #include <unistd.h>
 #include <string.h>
 #include <math.h>
@@ -46,15 +47,53 @@
 /* Counting semaphore, main synchronizer. Lock is taken once for each thread
  * and all are released at once by the master releasing it n-times
  * simultaneously */
-static sem_t start_barrier;
-static sem_t end_barrier;
+static sem_t workers_start_barrier;  /* Main sync point */
+static sem_t workers_end_barrier;    /* Second sync point */
+static sem_t master_end_barrier;
 
 /* Used non-counting, as a simple synchronizer letting master know at least
  * one thread has started and counting end-barrier is taken.*/
-static pthread_mutex_t workers = PTHREAD_MUTEX_INITIALIZER;
+//static pthread_mutex_t workers = PTHREAD_MUTEX_INITIALIZER;
 
 /* Number of workers (we don't have a sample struct yet, therefore global)*/
 static int nworkers;
+
+/* Sync count handling */
+
+static int waiting1 = 0;
+pthread_rwlock_t rw_lock1 = PTHREAD_RWLOCK_INITIALIZER;
+static int waiting2 = 0;
+pthread_rwlock_t rw_lock2 = PTHREAD_RWLOCK_INITIALIZER;
+
+static inline int get_waiting1(){
+	int tmp;
+
+	pthread_rwlock_rdlock(&rw_lock1);
+	tmp = waiting1;
+	pthread_rwlock_unlock(&rw_lock1);
+	return tmp;
+}
+
+static inline void inc_waiting1( int inc ){
+	pthread_rwlock_wrlock(&rw_lock1);
+	waiting1 += inc;
+	pthread_rwlock_unlock(&rw_lock1);
+}
+
+static inline int get_waiting2(){
+	int tmp;
+
+	pthread_rwlock_rdlock(&rw_lock2);
+	tmp = waiting2;
+	pthread_rwlock_unlock(&rw_lock2);
+	return tmp;
+}
+
+static inline void inc_waiting2( int inc ){
+	pthread_rwlock_wrlock(&rw_lock2);
+	waiting2 += inc;
+	pthread_rwlock_unlock(&rw_lock2);
+}
 
 /* Simple worker thread. As in-data it takes it's own list-slot (i.e. no
  * need to search and no concurrency aspects. It knows nothing about when to
@@ -67,6 +106,7 @@ void *poll_worker_thread(void* inarg) {
 	float fakt = 100.0*1000000.0/(float)samplermod_data.ptime;
 	memset(sig_sub->val,0,VAL_STR_MAX);
 	snprintf(sig_sub->val,VAL_STR_MAX,"%d",0);
+	int cnt = 0;
 
 	while(1) {
 		INFO(("--> Worker %d starts (nr: %d for line %d)\n",
@@ -74,14 +114,27 @@ void *poll_worker_thread(void* inarg) {
 					sig_sub->sub_id,
 					sig_def->id));
 
-		sem_post(&end_barrier);
-		sem_wait(&start_barrier); //Main sync point. Wait here.
+		assert_ext(sem_wait(&master_end_barrier) == 0);    //Workers never block here
+		INFO(("--> Worker %d will wait for sync...\n",sig_sub->id));
+		inc_waiting1(1);
+		assert_ext(sem_wait(&workers_start_barrier) == 0); //Main sync point. Wait here.
+		inc_waiting1(-1);
+		//assert_ext(sem_post(&master_end_barrier) == 0);    //Restore balance
 		INFO(("--> Worker %d in sync. Continues...\n",sig_sub->id));
-		sem_wait(&end_barrier);    /* Will not block, just takes a token */
-		INFO(("--> Worker %d notified master!\n",sig_sub->id));
-		pthread_mutex_unlock(&workers);    /* Tell master OK to continue */
-		INFO(("--> Running... %d\n",sig_sub->id));
+
+		assert_ext(sem_post(&master_end_barrier) == 0);
 		DUSLEEP(MEDIUM);
+
+#ifdef never
+		if (sig_sub->id=2000) {
+			cnt++;
+			if (cnt == 1) {
+				while (1)
+					sleep(1);
+			}
+		}
+#endif
+
 		/* Clear last value */
 		memset(sig_sub->val,0,VAL_STR_MAX);
 		{
@@ -94,11 +147,22 @@ void *poll_worker_thread(void* inarg) {
 				//sleep(200);
 			}
 			sig_sub->rtime.tv_sec=sig_sub->id;
-			snprintf(sig_sub->val,VAL_STR_MAX,"%f",sin(x));
+			snprintf(sig_sub->val,VAL_STR_MAX,"%f",
+				sin(x)+((float)sig_sub->id/10000.0))+\
+				((float)(sig_sub->id%10)/100.0);
 		}
 		sig_sub->is_updated=1;
 		/*Tell master one more is finished*/
-		sem_post(&end_barrier);
+		INFO(("--> Worker %d finished work waiting for buddies...\n",sig_sub->id));
+
+		/*Wait for buddies to catch-up before letting master update*/
+		inc_waiting2(1);
+		assert_ext(sem_wait(&workers_end_barrier) == 0);   //Catch-up sync point here.
+		inc_waiting2(-1);
+
+		/*Tell master one more is finished*/
+		INFO(("--> Worker %d all done!\n",sig_sub->id));
+		assert_ext(sem_post(&master_end_barrier) == 0);    //Restore balance
 	}
 }
 
@@ -108,24 +172,58 @@ void *poll_worker_thread(void* inarg) {
  * jitter compensate if needed. */
 void *poll_master_thread(void* inarg) {
 	struct sig_data *sig_data = inarg;
-	int i;
+	int i,nw;
 	handle_t list = samplermod_data.list;
 
 	while(1) {
 		/*Simulate sync*/
-		DUSLEEP(MEDIUM);
-		/* Tell all workers go!*/
-		INFO(("<-- Master sync. Will release %d workers\n",nworkers));
-		for(i=0; i<nworkers; i++) sem_post(&start_barrier);
-		INFO(("<-- Master has released %d workers\n",nworkers));
-		pthread_mutex_lock(&workers); /* Wait for at least one worker to
-										 start. That way we know "GO!" has
-										 been heard and acted upon*/
-		INFO(("<-- Master continues...\n",nworkers));
-		DUSLEEP(LONG);
+		//DUSLEEP(MEDIUM);
 
-		/* Wait for all to finish */
-		sem_wait(&end_barrier);
+		nw=get_waiting1();
+		INFO(("<-- %d of %d workers have blocked (i.e. started)\n",nw,nworkers));
+		for ( ; abs(nw)<nworkers; nw=get_waiting1() )
+		{
+				INFO(("<-- Waiting for %d of %d workers to block\n",nw,nworkers));
+				/* Some workers are late, wait a little for them */
+				usleep(100);
+		}
+
+		/* Tell all workers go!*/
+		INFO(("<-- Workers armed! Will release %d worker now\n",nworkers));
+		for(i=0; i<nworkers; i++) assert_ext(sem_post(&workers_start_barrier) == 0);
+		INFO(("<-- Master continues...\n",nworkers));
+		//DUSLEEP(LONG);
+
+		
+		
+		
+		nw=get_waiting2();
+		INFO(("<-- %d of %d workers have blocked (i.e. started)\n",nw,nworkers));
+		for ( ; abs(nw)<nworkers; nw=get_waiting2() )
+		{
+				INFO(("<-- Waiting for %d of %d workers to block\n",nw,nworkers));
+				/* Some workers are late, wait a little for them */
+				usleep(100);
+		}
+
+		/* Tell all workers go!*/
+		INFO(("<-- Workers gathered! Will release %d worker now\n",nworkers));
+		for(i=0; i<nworkers; i++) assert_ext(sem_post(&workers_end_barrier) == 0);
+		INFO(("<-- Master continues (again)...\n",nworkers));
+		
+		
+		
+		
+		/* Wait for all to finish (Should always block. Workers have more work to
+		 * do than master.*/
+
+		/* ..but just make a sanity check for now. */
+		assert_ext(sem_getvalue(&master_end_barrier, &i) ==0);
+		fprintf(stderr,"%d\n",i);
+		//assert(i==0);
+
+		assert_ext(sem_wait(&master_end_barrier) == 0);
+		assert_ext(sem_post(&master_end_barrier) == 0);    //+1 for up balance
 
 		/* Harvest, record time, output sample, calculate jitter-factor*/
 		harvest_sample(list);
@@ -146,22 +244,19 @@ int create_executor(handle_t list) {
 
 	/* Main sync-barrier. Start with no tokens, all workers will block
 	 * waiting for the master */
-	rc=sem_init(&start_barrier, 0, 0);
-	assert(rc==0);
+	assert_ext(sem_init(&workers_start_barrier, 0, 0) == 0);
 
 	/* Init with 0. Workers posts +1 on each runs start. Worker must take
 	 * token and will block until all threads have reached end-barrier. This
 	 * is what makes the lock-step work.*/
-	rc=sem_init(&end_barrier, 0, 0);
-	assert(rc==0);
+	assert_ext(sem_init(&master_end_barrier, 0, 0) == 0);
 
 	/* Make sure Master blocks. This is to avoid master having a chance to
 	 * race against the end-border if it for some reason would get to start
 	 * first time before any worker. It's very unlikely to happen and the
 	 * extra sync point costs time. Thinking about to remove it, worst that
 	 * can happen is that lock-step gets disfunct the first 1-2 samples. */
-	rc=pthread_mutex_lock(&workers);
-	assert(rc==0);
+	//assert_ext(pthread_mutex_lock(&workers) == 0);
 
 	/* Create a worker-threads, one for each sub-signal */
 	for(n=mlist_head(list); n; n=mlist_next(list)){
@@ -184,6 +279,7 @@ int create_executor(handle_t list) {
 			);
 			assert(rc==0);
 			assert(nworkers++<100); //Sanity-check,
+			assert_ext(sem_post(&master_end_barrier) == 0); //Build up balance
 		}
 	}
 
@@ -198,5 +294,6 @@ int create_executor(handle_t list) {
 		/* Really should joint the threads. But good for now. Root thread
 		 * will handle stdin, whilst poll_master_thread  handles output.*/
 		DUSLEEP(MEDIUM);
+		sleep(1);
 	}
 }

@@ -14,7 +14,7 @@ echo "Staring shabang. log-file available for: tail -f /tmp/sampler.log"
 
 LEGEND='--legend 0 "Period_time"'
 
-PERIOD=${1-"1000000"}
+PERIOD=${1-"100"}
 ./sampler testrc/thermal_1.ini $PERIOD | \
 	awk -F";" '
 		BEGIN{
@@ -39,9 +39,9 @@ PERIOD=${1-"1000000"}
 			--y2label="Sample accuracy" \
 			--ylabel="Thread values" \
 			--ymin -1 \
-			--ymax 1 \
-			--y2min 0.9999 \
-			--y2max 1.00001 \
+			--ymax 1.35 \
+			--y2min 0.01 \
+			--y2max 0.011434 \
 			--legend 0 "Period time" \
 			--legend 1 "ThreadVal 1" \
 			--legend 2 "ThreadVal 2" \
