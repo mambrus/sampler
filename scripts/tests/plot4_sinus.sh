@@ -31,8 +31,8 @@ PERIOD=${1-"100"}
 		}' | tee /tmp/sampler.log | \
 		feedgnuplot \
 			--geometry "60x35+0+0" \
-			--stream \
-			--xlen=100 \
+			--stream 0.1 \
+			--xlen=20 \
 			--domain \
 			--line \
 			--y2 0 \
