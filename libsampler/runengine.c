@@ -49,7 +49,6 @@
  * simultaneously */
 static sem_t workers_start_barrier;  /* Main sync point */
 static sem_t workers_end_barrier;    /* Second sync point */
-static sem_t master_end_barrier;
 
 /* Used non-counting, as a simple synchronizer letting master know at least
  * one thread has started and counting end-barrier is taken.*/
@@ -114,15 +113,12 @@ void *poll_worker_thread(void* inarg) {
 					sig_sub->sub_id,
 					sig_def->id));
 
-		assert_ext(sem_wait(&master_end_barrier) == 0);    //Workers never block here
 		INFO(("--> Worker %d will wait for sync...\n",sig_sub->id));
 		inc_waiting1(1);
 		assert_ext(sem_wait(&workers_start_barrier) == 0); //Main sync point. Wait here.
 		inc_waiting1(-1);
-		//assert_ext(sem_post(&master_end_barrier) == 0);    //Restore balance
 		INFO(("--> Worker %d in sync. Continues...\n",sig_sub->id));
 
-		assert_ext(sem_post(&master_end_barrier) == 0);
 		DUSLEEP(MEDIUM);
 
 #ifdef never
@@ -162,7 +158,6 @@ void *poll_worker_thread(void* inarg) {
 
 		/*Tell master one more is finished*/
 		INFO(("--> Worker %d all done!\n",sig_sub->id));
-		assert_ext(sem_post(&master_end_barrier) == 0);    //Restore balance
 	}
 }
 
@@ -211,19 +206,8 @@ void *poll_master_thread(void* inarg) {
 		for(i=0; i<nworkers; i++) assert_ext(sem_post(&workers_end_barrier) == 0);
 		INFO(("<-- Master continues (again)...\n",nworkers));
 		
-		
-		
-		
 		/* Wait for all to finish (Should always block. Workers have more work to
 		 * do than master.*/
-
-		/* ..but just make a sanity check for now. */
-		assert_ext(sem_getvalue(&master_end_barrier, &i) ==0);
-		fprintf(stderr,"%d\n",i);
-		//assert(i==0);
-
-		assert_ext(sem_wait(&master_end_barrier) == 0);
-		assert_ext(sem_post(&master_end_barrier) == 0);    //+1 for up balance
 
 		/* Harvest, record time, output sample, calculate jitter-factor*/
 		harvest_sample(list);
@@ -246,18 +230,6 @@ int create_executor(handle_t list) {
 	 * waiting for the master */
 	assert_ext(sem_init(&workers_start_barrier, 0, 0) == 0);
 
-	/* Init with 0. Workers posts +1 on each runs start. Worker must take
-	 * token and will block until all threads have reached end-barrier. This
-	 * is what makes the lock-step work.*/
-	assert_ext(sem_init(&master_end_barrier, 0, 0) == 0);
-
-	/* Make sure Master blocks. This is to avoid master having a chance to
-	 * race against the end-border if it for some reason would get to start
-	 * first time before any worker. It's very unlikely to happen and the
-	 * extra sync point costs time. Thinking about to remove it, worst that
-	 * can happen is that lock-step gets disfunct the first 1-2 samples. */
-	//assert_ext(pthread_mutex_lock(&workers) == 0);
-
 	/* Create a worker-threads, one for each sub-signal */
 	for(n=mlist_head(list); n; n=mlist_next(list)){
 		assert(n->pl);
@@ -279,7 +251,6 @@ int create_executor(handle_t list) {
 			);
 			assert(rc==0);
 			assert(nworkers++<100); //Sanity-check,
-			assert_ext(sem_post(&master_end_barrier) == 0); //Build up balance
 		}
 	}
 
