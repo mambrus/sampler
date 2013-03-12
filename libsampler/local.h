@@ -155,5 +155,11 @@ inline void inc_waiting1( int inc );
 inline int get_waiting2( void );
 inline void inc_waiting2( int inc );
 
+/* Worker threads */
+void *poll_worker_thread(void* inarg);
+
+/* Master threads*/
+void *poll_master_thread(void* inarg);
+
 #endif /* local_h */
 

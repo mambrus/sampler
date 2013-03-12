@@ -18,7 +18,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-/* This file contains worker threads (there might be several different
+/* This file contains master threads (there might be several different
  * depending on type instead of having logic "in thread". Separated threads
  * are faster an logic according to setting is only needed to be evaluated
  * once */
@@ -47,55 +47,54 @@
 #include "local.h"
 
 
-/* Simple worker thread. As in-data it takes it's own list-slot (i.e. no
- * need to search and no concurrency aspects. It knows nothing about when to
- * run, the poll_master dictates each run. */
-void *poll_worker_thread(void* inarg) {
-	struct sig_sub *sig_sub = inarg;
-	struct sig_data *sig_data = sig_sub->ownr;
-	struct sig_def *sig_def = &(sig_sub->ownr->ownr->sig_def);
-	float fakt = 10.0*1000000.0/(float)samplermod_data.ptime;
-	memset(sig_sub->val,0,VAL_STR_MAX);
-	snprintf(sig_sub->val,VAL_STR_MAX,"%d",0);
-	int rc,cnt = 0;
+/* Simple poll master thread. It tells when it's group of workers should run
+ * by releasing a semaphore periodically according to period time it
+ * administers. It's responsible for keeping time of each sample, and to
+ * jitter compensate if needed. */
+void *poll_master_thread(void* inarg) {
+	struct sig_data *sig_data = inarg;
+	int i,nw;
+	handle_t list = samplermod_data.list;
 
 	while(1) {
-		INFO(("--> Worker %d starts (nr: %d for line %d)\n",
-					sig_sub->id,
-					sig_sub->sub_id,
-					sig_def->id));
+		/*Simulate sync*/
+		//DUSLEEP(MEDIUM);
 
-		INFO(("--> Worker %d will wait for sync...\n",sig_sub->id));
-		inc_waiting1(1);
-		/* Main sync point. Wait here. */
-		assert_ext(sem_wait(&workers_start_barrier) == 0);
-		inc_waiting1(-1);
-		INFO(("--> Worker %d in sync. Continues...\n",sig_sub->id));
-
-		DUSLEEP(MEDIUM);
-
-		/* Clear last value */
-		memset(sig_sub->val,0,VAL_STR_MAX);
-
-		/*Will be a switch-case here (TBD)*/
-		rc=produce_sinus_data(sig_sub, cnt);
-
-		if (!rc) {
-			cnt++;
-
-			sig_sub->is_updated=1;
-			/*Tell master one more is finished*/
-			INFO(("--> Worker %d finished work waiting for buddies...\n",
-				sig_sub->id));
+		nw=get_waiting1();
+		INFO(("<-- %d of %d workers have blocked (i.e. started)\n",nw,nworkers));
+		for ( ; abs(nw)<samplermod_data.nworkers; nw=get_waiting1() )
+		{
+				INFO(("<-- Waiting for %d of %d workers to block\n",nw,nworkers));
+				/* Some workers are late, wait a little for them */
+				usleep(100);
 		}
 
-		/*Wait for buddies to catch-up before letting master update*/
-		inc_waiting2(1);
-		/*Catch-up sync point here.*/
-		assert_ext(sem_wait(&workers_end_barrier) == 0);
-		inc_waiting2(-1);
+		/* Tell all workers go!*/
+		INFO(("<-- Workers armed! Will release %d worker now\n",nworkers));
+		for(i=0; i<samplermod_data.nworkers; i++) assert_ext(sem_post(&workers_start_barrier) == 0);
+		INFO(("<-- Master continues...\n",nworkers));
+		//DUSLEEP(LONG);
 
-		/*Tell master one more is finished*/
-		INFO(("--> Worker %d all done!\n",sig_sub->id));
+		nw=get_waiting2();
+		INFO(("<-- %d of %d workers have blocked (i.e. started)\n",nw,nworkers));
+		for ( ; abs(nw)<samplermod_data.nworkers; nw=get_waiting2() )
+		{
+				INFO(("<-- Waiting for %d of %d workers to block\n",nw,nworkers));
+				/* Some workers are late, wait a little for them */
+				usleep(100);
+		}
+
+		/* Tell all workers go!*/
+		INFO(("<-- Workers gathered! Will release %d worker now\n",nworkers));
+		for(i=0; i<samplermod_data.nworkers; i++) assert_ext(sem_post(&workers_end_barrier) == 0);
+		INFO(("<-- Master continues (again)...\n",nworkers));
+
+		/* Wait for all to finish (Should always block. Workers have more work to
+		 * do than master.*/
+
+		/* Harvest, record time, output sample, calculate jitter-factor*/
+		harvest_sample(list);
+		INFO(("<-- Master harvest sample nr#: %llu\n",samplermod_data.smplcntr));
+		/* TBD */
 	}
 }

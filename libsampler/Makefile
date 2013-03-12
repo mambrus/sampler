@@ -9,9 +9,10 @@ LOCAL_SRC_FILESS := \
    sampler.c  \
    parse_setup.c \
    runengine.c \
+   masters.c \
+   harvest.c \
    workers.c \
    worker_tasks.c \
-   harvest.c \
 
 # Final order
 #   masters.c \
