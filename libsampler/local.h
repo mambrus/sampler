@@ -18,7 +18,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-/* Local interface & stuff of sampler-module  */
+/* Local interface & stuff for the sampler library/module  */
 
 #ifndef local_h
 #define local_h
@@ -36,6 +36,7 @@ int create_executor(handle_t list);
 int self_destruct(handle_t list);
 void harvest_sample(const handle_t list);
 int produce_sinus_data(struct sig_sub* sig_sub, int cnt);
+struct timeval tv_diff( struct timeval t0, struct timeval t1 );
 
 #ifndef DBGLVL
 #define DBGLVL 3
@@ -160,6 +161,17 @@ void *poll_worker_thread(void* inarg);
 
 /* Master threads*/
 void *poll_master_thread(void* inarg);
+
+/* Various other module-global functions */
+int parse_initfile(const char *fn, handle_t *list);
+int create_executor(handle_t list);
+int self_destruct(handle_t list);
+void harvest_sample(const handle_t list);
+int produce_sinus_data(struct sig_sub* sig_sub, int cnt);
+#define SEC( TV ) ((int)TV.tv_sec)
+#define USEC( TV ) ((int)TV.tv_usec)
+struct timeval tv_diff(struct timeval t0, struct timeval t1);
+struct timeval tv_add(struct timeval t0, struct timeval t1);
 
 #endif /* local_h */
 

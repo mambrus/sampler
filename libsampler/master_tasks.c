@@ -32,49 +32,6 @@
 #include "sigstruct.h"
 #include "local.h"
 
-#define SEC( TV ) ((int)TV.tv_sec)
-#define USEC( TV ) ((int)TV.tv_usec)
-
-static struct timeval tv_diff( struct timeval t0, struct timeval t1 ) {
-	struct timeval tv;
-
-	/* We don't know the scalar base-types. Therefore creating extra
-	 * temp of known type and let the cast occur in two steps */
-	int32_t t0_us = t0.tv_usec;
-	int32_t t1_us = t1.tv_usec;
-	int32_t tr_us;
-
-	tv.tv_sec = t1.tv_sec - t0.tv_sec;
-	tr_us = t1_us - t0_us;
-	if (tr_us<0 ){
-		tv.tv_sec--;
-		tv.tv_usec = 1000000l + tr_us;
-	} else
-		tv.tv_usec = tr_us;
-
-	return tv;
-}
-
-static struct timeval tv_add( struct timeval t0, struct timeval t1 ) {
-	struct timeval tv;
-
-	/* We don't know the scalar base-types. Therefore creating extra
-	 * temp of known type and let the cast occur in two steps */
-	int32_t t0_us = t0.tv_usec;
-	int32_t t1_us = t1.tv_usec;
-	int32_t tr_us;
-
-	tv.tv_sec = t1.tv_sec + t0.tv_sec;
-	tr_us = t1_us + t0_us;
-	if (tr_us>=1000000){
-		tv.tv_sec++;
-		tv.tv_usec = tr_us - 1000000l;
-	} else
-		tv.tv_usec = tr_us;
-
-	return tv;
-}
-
 /* Output in format according to settings */
 void output(int cid, const char *val, int always ) {
 	int wa = 0;
@@ -114,9 +71,11 @@ void output(int cid, const char *val, int always ) {
 	}
 }
 
-/* What to do if isn't updated. Both drivegnuplot and feedgnuplot currently
- * get their streams confused and we in such case we need to output
- * something */
+/* What to do if data isn't updated. Both drivegnuplot and feedgnuplot
+ * currently get their streams confused if there's no data for a stream and
+ * we in such case we need to output something (preferred would be
+ * outputting nothing and to also get a corresponding break in the
+ * continuity of the plot) */
 static void ondataempty(int cid, const struct sig_sub* sig_sub) {
 	switch (samplermod_data.whatTodo) {
 		case Lastval:

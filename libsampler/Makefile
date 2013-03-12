@@ -9,17 +9,11 @@ LOCAL_SRC_FILESS := \
    sampler.c  \
    parse_setup.c \
    runengine.c \
+   time.c \
    masters.c \
-   harvest.c \
+   master_tasks.c \
    workers.c \
    worker_tasks.c \
-
-# Final order
-#   masters.c \
-#   harvest.c \
-#   time.c \
-#   workers.c \
-#   worker_tasks.c \
 
 
 LOCAL_LIBS := \
