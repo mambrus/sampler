@@ -114,7 +114,7 @@ static int parse_dfn_line(const regex_t *preg, char *line, struct smpl_signal *r
 	rsig->sig_def.fdata			= strdup(&(line[mtch_idxs[SFDATA].rm_so]));
 	rsig->sig_def.fopmode.mask	= atoi(&(line[mtch_idxs[SPERS].rm_so]));
 
-	fprintf(stderr,"Size of fopmode: %d\nFile operation bits:\n"
+	fprintf(stderr,"Size of fopmode: %lu\nFile operation bits:\n"
 			"   openclose:%d\n"
 			"   canblock:%d\n"
 			"   always:%d\n",

@@ -9,7 +9,16 @@ LOCAL_SRC_FILESS := \
    sampler.c  \
    parse_setup.c \
    runengine.c \
-   harvest.c
+   worker_tasks.c \
+   harvest.c \
+
+# Final order
+#   masters.c \
+#   harvest.c \
+#   time.c \
+#   workers.c \
+#   worker_tasks.c \
+
 
 LOCAL_LIBS := \
     pthread \

@@ -58,7 +58,6 @@ static sem_t workers_end_barrier;    /* Second sync point */
 static int nworkers;
 
 /* Sync count handling */
-
 static int waiting1 = 0;
 pthread_rwlock_t rw_lock1 = PTHREAD_RWLOCK_INITIALIZER;
 static int waiting2 = 0;
@@ -101,11 +100,10 @@ void *poll_worker_thread(void* inarg) {
 	struct sig_sub *sig_sub = inarg;
 	struct sig_data *sig_data = sig_sub->ownr;
 	struct sig_def *sig_def = &(sig_sub->ownr->ownr->sig_def);
-	int   loop_cntr = 0;
 	float fakt = 10.0*1000000.0/(float)samplermod_data.ptime;
 	memset(sig_sub->val,0,VAL_STR_MAX);
 	snprintf(sig_sub->val,VAL_STR_MAX,"%d",0);
-	int cnt = 0;
+	int rc,cnt = 0;
 
 	while(1) {
 		INFO(("--> Worker %d starts (nr: %d for line %d)\n",
@@ -115,45 +113,32 @@ void *poll_worker_thread(void* inarg) {
 
 		INFO(("--> Worker %d will wait for sync...\n",sig_sub->id));
 		inc_waiting1(1);
-		assert_ext(sem_wait(&workers_start_barrier) == 0); //Main sync point. Wait here.
+		/* Main sync point. Wait here. */
+		assert_ext(sem_wait(&workers_start_barrier) == 0);
 		inc_waiting1(-1);
 		INFO(("--> Worker %d in sync. Continues...\n",sig_sub->id));
 
 		DUSLEEP(MEDIUM);
 
-#ifdef never
-		if (sig_sub->id=2000) {
-			cnt++;
-			if (cnt == 1) {
-				while (1)
-					sleep(1);
-			}
-		}
-#endif
-
 		/* Clear last value */
 		memset(sig_sub->val,0,VAL_STR_MAX);
-		{
-			/* Work goes here */
-			float x;
 
-			x=(loop_cntr/fakt/*100.0*/)*2.0*3.1415;
-			loop_cntr++;
-			if (sig_sub->id == 2 && samplermod_data.smplcntr==30) {
-				//sleep(200);
-			}
-			sig_sub->rtime.tv_sec=sig_sub->id;
-			snprintf(sig_sub->val,VAL_STR_MAX,"%f",
-				sin(x)+((float)sig_sub->id/10000.0))+\
-				((float)(sig_sub->id%10)/100.0);
+		/*Will be a switch-case here (TBD)*/
+		rc=produce_sinus_data(sig_sub, cnt);
+
+		if (!rc) {
+			cnt++;
+
+			sig_sub->is_updated=1;
+			/*Tell master one more is finished*/
+			INFO(("--> Worker %d finished work waiting for buddies...\n",
+				sig_sub->id));
 		}
-		sig_sub->is_updated=1;
-		/*Tell master one more is finished*/
-		INFO(("--> Worker %d finished work waiting for buddies...\n",sig_sub->id));
 
 		/*Wait for buddies to catch-up before letting master update*/
 		inc_waiting2(1);
-		assert_ext(sem_wait(&workers_end_barrier) == 0);   //Catch-up sync point here.
+		/*Catch-up sync point here.*/
+		assert_ext(sem_wait(&workers_end_barrier) == 0);
 		inc_waiting2(-1);
 
 		/*Tell master one more is finished*/
@@ -189,9 +174,6 @@ void *poll_master_thread(void* inarg) {
 		INFO(("<-- Master continues...\n",nworkers));
 		//DUSLEEP(LONG);
 
-		
-		
-		
 		nw=get_waiting2();
 		INFO(("<-- %d of %d workers have blocked (i.e. started)\n",nw,nworkers));
 		for ( ; abs(nw)<nworkers; nw=get_waiting2() )
@@ -205,7 +187,7 @@ void *poll_master_thread(void* inarg) {
 		INFO(("<-- Workers gathered! Will release %d worker now\n",nworkers));
 		for(i=0; i<nworkers; i++) assert_ext(sem_post(&workers_end_barrier) == 0);
 		INFO(("<-- Master continues (again)...\n",nworkers));
-		
+
 		/* Wait for all to finish (Should always block. Workers have more work to
 		 * do than master.*/
 
