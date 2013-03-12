@@ -34,6 +34,7 @@ int parse_initfile(const char *fn, handle_t *list);
 int create_executor(handle_t list);
 int self_destruct(handle_t list);
 void harvest_sample(const handle_t list);
+int produce_sinus_data(struct sig_sub* sig_sub, int cnt);
 
 #ifndef DBGLVL
 #define DBGLVL 3
