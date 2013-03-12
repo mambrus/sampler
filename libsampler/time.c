@@ -82,3 +82,41 @@ struct timeval tv_add(struct timeval t0, struct timeval t1) {
 	return tv;
 }
 
+/* Return "time-now" in best available format according to modality.
+ * Currently using either:
+ *  int clock_gettime(clockid_t clock_id, struct timespec *tp);
+ *  int gettimeofday(struct timeval *restrict tp, void *restrict tzp);
+ *
+ * Both represent time in some "absolute" form. What's most interesting is a
+ * time-representation as close to kernel-time as possible, in which case
+ * clock_gettime(CLOCK_MONOTONIC_RAW) would be preferred. This however
+ * either isn't available at all systems or requires root-privileges.
+ * Therefore as first fall-back: CLOCK_MONOTONIC is used and as second
+ * fall-back: calender-time in form of clock_gettime is used.
+ *
+ * Note however that all SW clocks, even global ones, are drift compensated
+ * which is a disadvantage if a sample is to be compared with a kernel
+ * log-entry event (except CLOCK_MONOTONIC_RAW i.e. which is a drift
+ * uncompensated clock) */
+int time_now(struct timespec *tp) {
+	int rc;
+	switch (samplermod_data.clock_type) {
+		case KERNEL_CLOCK:
+#ifdef CLOCK_MONOTONIC_RAW
+			rc=clock_gettime(CLOCK_MONOTONIC_RAW, tp);
+#else
+			rc=clock_gettime(CLOCK_MONOTONIC, tp);
+#endif
+			break;
+		case CALENDER_CLOCK:
+			rc=clock_gettime(CLOCK_REALTIME, tp);
+			//Alternatively clock_gettimeofday can be used but with lower
+			//resolution.
+			break;
+		case AUTODETECT:
+		default:
+			fprintf(stderr,"clock-type not supported\n");
+			rc=-1;
+	}
+	return rc;
+}

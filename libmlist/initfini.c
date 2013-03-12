@@ -30,7 +30,7 @@
 /*----------------------------------------------------------------------*/
 /* Module initializers */
 void __init mlist_init(void) {
-#ifndef NDEBUG
+#ifdef INITFINI_SHOW
 	fprintf(stderr,"==========_init==========\n");
 #endif
 	assert(!mlistmod_data.isinit);
@@ -42,7 +42,7 @@ void __init mlist_init(void) {
 
 void __fini mlist_fini(void) {
 	struct node *tnext;   /* Needed because race could happen */
-#ifndef NDEBUG
+#ifdef INITFINI_SHOW
 	fprintf(stderr,"==========_fini==========\n");
 #endif
 	assert(mlistmod_data.isinit);

@@ -24,6 +24,7 @@
 #include <errno.h>
 #include <string.h>
 #include <sys/types.h>
+#include <time.h>
 #include "local.h"
 
 /* Module initializers. Not much to do here for init, but fini might have
@@ -32,17 +33,32 @@
  * * Free allocated memory
  */
 void __init __sampler_init(void) {
-#ifndef NDEBUG
+#ifdef INITFINI_SHOW
 	fprintf(stderr,"==========_init  "__FILE__"==========\n");
 #endif
 	assert(!samplermod_data.isinit);
+	samplermod_data.smplcntr=0;
+	if (samplermod_data.clock_type == AUTODETECT) {
+		struct timespec tv;
+#ifdef CLOCK_MONOTONIC_RAW
+		if (clock_gettime(CLOCK_MONOTONIC_RAW, &tv) == 0)
+			samplermod_data.clock_type = KERNEL_CLOCK;
+#else
+#  warning CLOCK_MONOTONIC_RAW undefined. 
+#  warning Best aproximation of kernel-time will be using CLOCK_MONOTONIC
+		if (clock_gettime(CLOCK_MONOTONIC, &tv) == 0)
+			samplermod_data.clock_type = KERNEL_CLOCK;
+#endif
+		else
+			samplermod_data.clock_type = CALENDER_CLOCK;
+	}
 	samplermod_data.smplcntr=0;
 
 	samplermod_data.isinit=1;
 }
 
 void __fini __sampler_fini(void) {
-#ifndef NDEBUG
+#ifdef INITFINI_SHOW
 	fprintf(stderr,"==========_fini "__FILE__" ==========\n");
 #endif
 	if (!samplermod_data.isinit)

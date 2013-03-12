@@ -21,6 +21,7 @@
 #include <mlist.h>
 #include <stdio.h>
 #include <assert.h>
+#include "assert_np.h"
 #include <unistd.h>
 #include <time.h>
 #include <sys/times.h>
@@ -130,8 +131,17 @@ void harvest_sample(const handle_t list) {
 		struct timeval tdiff;
 		int uComp;
 		struct timeval tv_comp;
+		struct timespec hr_tnow;
 
-		gettimeofday(&tnow1, NULL);
+		assert_ext(time_now(&hr_tnow) == 0);
+		/* Down-scale. Kernel log doesn't show better res than us anyway.
+		 * int-div can't be more costly than outputting 3 extra characters.
+		 * Might want higher resolution for time-keeping later though, which
+		 * should give more precise time calculation and minimize (positive)
+		 * drift when jitter-compensate. */
+		tnow1.tv_sec = hr_tnow.tv_sec;
+		tnow1.tv_usec = hr_tnow.tv_nsec/1000;
+
 		if (first) {
 			first = 0;
 			tlast=tnow1;

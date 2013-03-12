@@ -19,6 +19,7 @@ LOCAL_SRC_FILESS := \
 LOCAL_LIBS := \
     pthread \
 	m \
+	rt \
     mlist
 
 LOCAL_CFLAGS := -fPIC

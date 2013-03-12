@@ -30,6 +30,7 @@ struct samplermod_struct samplermod_data = {
 /* Initialize settings with default values */
 	.list = 0,
 	.ptime = -1,
+	.clock_type = AUTODETECT,
 	.smplcntr = UINT64_MAX,
 	//.plotmode = driveGnuPlot,
 	.plotmode = feedgnuplot,

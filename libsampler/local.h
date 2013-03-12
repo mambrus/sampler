@@ -113,12 +113,19 @@ enum whatTodo {
 	PresetSmplStr
 };
 
+enum clock_type {
+	AUTODETECT = 0,     /* Probes during startup and selects best type */
+	KERNEL_CLOCK,		/* As close to kernel time as possible */
+	CALENDER_CLOCK		/* Best form of calender clock is used */
+};
+
 struct samplermod_struct {
 	int isinit;
 
 /* Settings */
 	handle_t list;
 	int ptime; /* Period time in us (Max: 4294/2=2147s = 35min) */
+	enum clock_type clock_type;
 	uint64_t smplcntr;
 	enum plotmode plotmode;
 	char delimiter;
