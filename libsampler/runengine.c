@@ -44,26 +44,15 @@
 #endif
 #include "local.h"
 
-/* Counting semaphore, main synchronizer. Lock is taken once for each thread
- * and all are released at once by the master releasing it n-times
- * simultaneously */
-static sem_t workers_start_barrier;  /* Main sync point */
-static sem_t workers_end_barrier;    /* Second sync point */
-
-/* Used non-counting, as a simple synchronizer letting master know at least
- * one thread has started and counting end-barrier is taken.*/
-//static pthread_mutex_t workers = PTHREAD_MUTEX_INITIALIZER;
-
-/* Number of workers (we don't have a sample struct yet, therefore global)*/
-static int nworkers;
-
-/* Sync count handling */
-static int waiting1 = 0;
+/* Owner of some needed globals...*/
+sem_t workers_start_barrier;
+sem_t workers_end_barrier;
+int waiting1 = 0;
 pthread_rwlock_t rw_lock1 = PTHREAD_RWLOCK_INITIALIZER;
-static int waiting2 = 0;
+int waiting2 = 0;
 pthread_rwlock_t rw_lock2 = PTHREAD_RWLOCK_INITIALIZER;
 
-static inline int get_waiting1(){
+inline int get_waiting1(){
 	int tmp;
 
 	pthread_rwlock_rdlock(&rw_lock1);
@@ -72,13 +61,13 @@ static inline int get_waiting1(){
 	return tmp;
 }
 
-static inline void inc_waiting1( int inc ){
+inline void inc_waiting1( int inc ){
 	pthread_rwlock_wrlock(&rw_lock1);
 	waiting1 += inc;
 	pthread_rwlock_unlock(&rw_lock1);
 }
 
-static inline int get_waiting2(){
+inline int get_waiting2(){
 	int tmp;
 
 	pthread_rwlock_rdlock(&rw_lock2);
@@ -87,7 +76,7 @@ static inline int get_waiting2(){
 	return tmp;
 }
 
-static inline void inc_waiting2( int inc ){
+inline void inc_waiting2( int inc ){
 	pthread_rwlock_wrlock(&rw_lock2);
 	waiting2 += inc;
 	pthread_rwlock_unlock(&rw_lock2);
@@ -161,7 +150,7 @@ void *poll_master_thread(void* inarg) {
 
 		nw=get_waiting1();
 		INFO(("<-- %d of %d workers have blocked (i.e. started)\n",nw,nworkers));
-		for ( ; abs(nw)<nworkers; nw=get_waiting1() )
+		for ( ; abs(nw)<samplermod_data.nworkers; nw=get_waiting1() )
 		{
 				INFO(("<-- Waiting for %d of %d workers to block\n",nw,nworkers));
 				/* Some workers are late, wait a little for them */
@@ -170,13 +159,13 @@ void *poll_master_thread(void* inarg) {
 
 		/* Tell all workers go!*/
 		INFO(("<-- Workers armed! Will release %d worker now\n",nworkers));
-		for(i=0; i<nworkers; i++) assert_ext(sem_post(&workers_start_barrier) == 0);
+		for(i=0; i<samplermod_data.nworkers; i++) assert_ext(sem_post(&workers_start_barrier) == 0);
 		INFO(("<-- Master continues...\n",nworkers));
 		//DUSLEEP(LONG);
 
 		nw=get_waiting2();
 		INFO(("<-- %d of %d workers have blocked (i.e. started)\n",nw,nworkers));
-		for ( ; abs(nw)<nworkers; nw=get_waiting2() )
+		for ( ; abs(nw)<samplermod_data.nworkers; nw=get_waiting2() )
 		{
 				INFO(("<-- Waiting for %d of %d workers to block\n",nw,nworkers));
 				/* Some workers are late, wait a little for them */
@@ -185,7 +174,7 @@ void *poll_master_thread(void* inarg) {
 
 		/* Tell all workers go!*/
 		INFO(("<-- Workers gathered! Will release %d worker now\n",nworkers));
-		for(i=0; i<nworkers; i++) assert_ext(sem_post(&workers_end_barrier) == 0);
+		for(i=0; i<samplermod_data.nworkers; i++) assert_ext(sem_post(&workers_end_barrier) == 0);
 		INFO(("<-- Master continues (again)...\n",nworkers));
 
 		/* Wait for all to finish (Should always block. Workers have more work to
@@ -232,7 +221,7 @@ int create_executor(handle_t list) {
 				sig_sub
 			);
 			assert(rc==0);
-			assert(nworkers++<100); //Sanity-check,
+			assert(samplermod_data.nworkers++<100); //Sanity-check,
 		}
 	}
 

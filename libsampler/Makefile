@@ -9,6 +9,7 @@ LOCAL_SRC_FILESS := \
    sampler.c  \
    parse_setup.c \
    runengine.c \
+   workers.c \
    worker_tasks.c \
    harvest.c \
 

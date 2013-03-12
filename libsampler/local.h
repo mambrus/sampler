@@ -24,6 +24,7 @@
 #define local_h
 #include <mlist.h>
 #include <stdio.h>
+#include <semaphore.h>
 
 #include "sigstruct.h"
 
@@ -113,18 +114,46 @@ enum whatTodo {
 
 struct samplermod_struct {
 	int isinit;
+
+/* Settings */
 	handle_t list;
-	int ptime;              /* Period time in us (Max: 4294/2=2147s
-							   = 35min) */
+	int ptime; /* Period time in us (Max: 4294/2=2147s = 35min) */
 	uint64_t smplcntr;
 	enum plotmode plotmode;
 	char delimiter;
 	enum whatTodo whatTodo;
 	int cid_offs;
 	char presetval[VAL_STR_MAX]; /* What to print in case is needed */
+
+/* Helper variables*/
+	int nworkers;
 };
 
+/* Counting semaphore, main synchronizer. Lock is taken once for each thread
+ * and all are released at once by the master releasing it n-times
+ * simultaneously */
+extern sem_t workers_start_barrier;  /* Main sync point */
+extern sem_t workers_end_barrier;    /* Second sync point */
+
 extern struct samplermod_struct samplermod_data;
+extern sem_t workers_start_barrier;  /* Main sync point */
+extern sem_t workers_end_barrier;    /* Second sync point */
+
+/* Non-counting, as a simple synchronizer letting master know at least
+ * one thread has started and counting end-barrier is taken.*/
+//static pthread_mutex_t workers = PTHREAD_MUTEX_INITIALIZER;
+
+/* Sync count handling - of no value having in modglobas as they are
+ * meaningless for humans */
+extern int waiting1;
+extern pthread_rwlock_t rw_lock1;
+extern int waiting2;
+extern pthread_rwlock_t rw_lock2;
+
+inline int get_waiting1( void );
+inline void inc_waiting1( int inc );
+inline int get_waiting2( void );
+inline void inc_waiting2( int inc );
 
 #endif /* local_h */
 

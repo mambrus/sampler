@@ -18,26 +18,29 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+/* This file contains stuff needed for running the sampler. I.e. the threads
+ * and logic synchronizing them */
+
+#include <pthread.h>
+#include <semaphore.h>
+#define LDATA struct smpl_signal
+#include <mlist.h>
+#include <stdio.h>
+#include <assert.h>
+#include "assert_np.h"
+#include <unistd.h>
+#include <string.h>
+#include <math.h>
+
+/* Include module common stuff */
+#include "sampler.h"
+#include "sigstruct.h"
+#ifndef DBGLVL
+#define DBGLVL 0
+#endif
+
+#ifndef TESTSPEED
+#define TESTSPEED 5
+#endif
 #include "local.h"
-#include <limits.h>
-#include <stdint.h>
 
-/* Module (global) data. Placed in struct to be easier to find by GDB. Must
- * be global as several c-files belonging to the same module shares this */
-struct samplermod_struct samplermod_data = {
-	.isinit = 0,
-
-/* Initialize settings with default values */
-	.list = 0,
-	.ptime = -1,
-	.smplcntr = UINT64_MAX,
-	//.plotmode = driveGnuPlot,
-	.plotmode = feedgnuplot,
-	.presetval = "0",
-	.cid_offs = 2,
-	.delimiter = ';', .whatTodo = Lastval,/*Always Output something:
-											feedgnuplot compatible and error
-											detectable */
-/* Initialize helper variables */
-	.nworkers = 0,
-};
