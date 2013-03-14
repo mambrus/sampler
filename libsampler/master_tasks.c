@@ -120,7 +120,6 @@ static void collect_and_print(const handle_t list){
 	if (!samplermod_data.plotmode == driveGnuPlot) {
 		fputc('\n',stdout);
 	}
-	fflush(stdout);
 }
 
 /* Harvest finished sample and print it */
@@ -161,7 +160,9 @@ void harvest_sample(const handle_t list) {
 		collect_and_print(list);
 		++samplermod_data.smplcntr;
 
-		gettimeofday(&tnow2, NULL);
+		assert_ext(time_now(&hr_tnow) == 0);
+		tnow2.tv_sec = hr_tnow.tv_sec;
+		tnow2.tv_usec = hr_tnow.tv_nsec/1000;
 		tdiff=tv_diff(tlast,tnow2);
 
 		tv_comp = tv_diff(

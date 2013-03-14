@@ -131,5 +131,6 @@ int create_executor(handle_t list) {
 		 * will handle stdin, whilst poll_master_thread  handles output.*/
 		DUSLEEP(MEDIUM);
 		sleep(1);
+		fflush(stdout);
 	}
 }
