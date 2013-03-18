@@ -105,24 +105,26 @@ static int parse_dfn_line(const regex_t *preg, char *line, struct smpl_signal *r
 	 * Note that index=0 matches the compete pattern. I.e. add +1 */
 	for (i=1; i<=MAX_DFN_COLUMNS; i++) {
 		line[mtch_idxs[i].rm_eo]=0;
-		fprintf(stderr,"%02d: %s\n", i, &(line[mtch_idxs[i].rm_so]));
+		INFO(("%02d: %s\n", i, &(line[mtch_idxs[i].rm_so])));
 	}
 
 	rsig->sig_def.id			= lno;
 	rsig->sig_def.name			= strdup(&(line[mtch_idxs[SNAME].rm_so]));
 	rsig->sig_def.fname			= strdup(&(line[mtch_idxs[SFNAME].rm_so]));
 	rsig->sig_def.fdata			= strdup(&(line[mtch_idxs[SFDATA].rm_so]));
-	rsig->sig_def.fopmode.mask	= atoi(&(line[mtch_idxs[SPERS].rm_so]));
+	rsig->sig_def.fopmode.mask	= atoi(&(line[mtch_idxs[SFOPMOD].rm_so]));
 
-	fprintf(stderr,"Size of fopmode: %lu\nFile operation bits:\n"
+	INFO(("Size of fopmode: %u\nFile operation bits:\n"
 			"   openclose:%d\n"
 			"   canblock:%d\n"
+			"   rewind:%d\n"
 			"   always:%d\n",
-			sizeof(union fopmode),
+			(uint32_t)sizeof(union fopmode),
 			rsig->sig_def.fopmode.bits.openclose,
 			rsig->sig_def.fopmode.bits.canblock,
+			rsig->sig_def.fopmode.bits.rewind,
 			rsig->sig_def.fopmode.bits.always
-	);
+	));
 
 	/*Parse the line identifier regex*/
 	rsig->sig_def.rgx_line.str	= strdup(&(line[mtch_idxs[SRGXL].rm_so]));
@@ -166,6 +168,7 @@ static int parse_dfn_line(const regex_t *preg, char *line, struct smpl_signal *r
 		(rsig->sig_def.idxs)[0]			= 0;
 		rsig->sig_data.nsigs			= 1;
 		rsig->sig_data.ownr				= rsig;
+		rsig->sig_data.fd				= -1;
 		rsig->sig_data.sigs				= calloc(1, sizeof(struct sig_sub));
 		assert(rsig->sig_data.sigs);
 		(rsig->sig_data.sigs)[0].ownr	= &rsig->sig_data;
@@ -196,6 +199,7 @@ static int parse_dfn_line(const regex_t *preg, char *line, struct smpl_signal *r
 
 		rsig->sig_data.nsigs = nidx;
 		rsig->sig_data.ownr = rsig;
+		rsig->sig_data.fd = -1;
 		rsig->sig_def.idxs = calloc(nidx, sizeof(int));
 		memset(rsig->sig_def.idxs, 0, nidx*sizeof(int));
 		rsig->sig_data.sigs	= calloc(nidx, sizeof(struct sig_sub));
@@ -252,7 +256,7 @@ int parse_initfile(const char *fn, handle_t *list) {
 
 	fl=fopen(fn,"r");
 	if (fl==NULL) {
-		printf("%s",line);
+		fprintf(stderr,"%s",line);
 		perror("Signal description file-error:");
 		exit(1);
 	}
@@ -299,7 +303,7 @@ int parse_initfile(const char *fn, handle_t *list) {
 			rc = EBADF;
 			goto fin_pars_init;
 		} else if (feof(fl)) {
-			fprintf(stderr,"Info: Scanned %d lines successfully\n",lno-1);
+			INFO(("Info: Scanned %d lines successfully\n",lno-1));
 			rc = 0;
 			goto fin_pars_init;
 		} else {

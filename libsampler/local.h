@@ -35,8 +35,8 @@ int parse_initfile(const char *fn, handle_t *list);
 int create_executor(handle_t list);
 int self_destruct(handle_t list);
 void harvest_sample(const handle_t list);
-int produce_sinus_data(struct sig_sub* sig_sub, int cnt);
 struct timeval tv_diff( struct timeval t0, struct timeval t1 );
+void outputlegends(void);
 
 #ifndef DBGLVL
 #define DBGLVL 3
@@ -46,18 +46,26 @@ struct timeval tv_diff( struct timeval t0, struct timeval t1 );
 #define TESTSPEED 3
 #endif
 
+#define INFO_TO( F, FNKN, S ) \
+	{ \
+		if (samplermod_data.verbose) { \
+			FNKN S; \
+		} \
+		fflush( F ); \
+	}
+
 #if ( DBGLVL == 0 )
 #  define INFO( S ) ((void)0)
 #  define DUSLEEP( T ) ((void)0)
 #elif ( DBGLVL == 1 )
-#  define INFO( S )  printf S
+#  define INFO( S ) INFO_TO( stdout, printf, S )
 #  define DUSLEEP( U ) usleep( U )
 #elif ( DBGLVL == 2 )
-#  define INFO( S ) { printf S; fflush(stdout); }
+#  define INFO( S ) INFO_TO( stdout, printf, S )
 #  define DUSLEEP( U ) usleep( U )
 #elif ( DBGLVL == 3 )
 #  define eprintf(...) fprintf (stderr, __VA_ARGS__)
-#  define INFO( S ) eprintf S
+#  define INFO( S ) INFO_TO( stderr, eprintf, S )
 #  define DUSLEEP( U ) usleep( U )
 #else
 #error bad value of DBGLVL
@@ -131,9 +139,12 @@ struct samplermod_struct {
 	char delimiter;
 	enum whatTodo whatTodo;
 	int cid_offs;
-	char presetval[VAL_STR_MAX]; /* What to print in case is needed */
-
+	int verbose;
+	int dolegend;
 /* Helper variables*/
+	void *(*dflt_worker)(void*);
+	int (*dflt_task)(struct sig_sub*, int);
+	char presetval[VAL_STR_MAX]; /* What to print in case is needed */
 	int nworkers;
 };
 
@@ -165,6 +176,16 @@ inline void inc_waiting2( int inc );
 
 /* Worker threads */
 void *poll_worker_thread(void* inarg);
+void *sinus_worker_thread(void* inarg);
+
+/* Worker tasks */
+int poll_fdata(                /* Read data from file. Generic catch all */
+	struct sig_sub* sig_sub,   /* variant. I.e. slow & not optimized for */
+	int cnt);                  /* the job */
+
+int sinus_data(                /* Test-task. Produces high-res sinus-wave */
+	struct sig_sub* sig_sub,
+	int cnt);
 
 /* Master threads*/
 void *poll_master_thread(void* inarg);

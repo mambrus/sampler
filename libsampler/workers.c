@@ -47,14 +47,12 @@
 #include "local.h"
 
 
-/* Simple worker thread. As in-data it takes it's own list-slot (i.e. no
- * need to search and no concurrency aspects. It knows nothing about when to
- * run, the poll_master dictates each run. */
-void *poll_worker_thread(void* inarg) {
+/* Simple worker thread to produce test-data */
+void *sinus_worker_thread(void* inarg) {
 	struct sig_sub *sig_sub = inarg;
 	struct sig_data *sig_data = sig_sub->ownr;
 	struct sig_def *sig_def = &(sig_sub->ownr->ownr->sig_def);
-	float fakt = 10.0*1000000.0/(float)samplermod_data.ptime;
+
 	memset(sig_sub->val,0,VAL_STR_MAX);
 	snprintf(sig_sub->val,VAL_STR_MAX,"%d",0);
 	int rc,cnt = 0;
@@ -77,8 +75,60 @@ void *poll_worker_thread(void* inarg) {
 		/* Clear last value */
 		memset(sig_sub->val,0,VAL_STR_MAX);
 
-		/*Will be a switch-case here (TBD)*/
-		rc=produce_sinus_data(sig_sub, cnt);
+		rc=sinus_data(sig_sub, cnt);
+
+		if (!rc) {
+			cnt++;
+
+			sig_sub->is_updated=1;
+			/*Tell master one more is finished*/
+			INFO(("--> Worker %d finished work waiting for buddies...\n",
+				sig_sub->id));
+		}
+
+		/*Wait for buddies to catch-up before letting master update*/
+		inc_waiting2(1);
+		/*Catch-up sync point here.*/
+		assert_ext(sem_wait(&workers_end_barrier) == 0);
+		inc_waiting2(-1);
+
+		/*Tell master one more is finished*/
+		INFO(("--> Worker %d all done!\n",sig_sub->id));
+	}
+}
+
+/* Simple worker thread. As in-data it takes it's own list-slot (i.e. no
+ * need to search and no concurrency aspects. It knows nothing about when to
+ * run, the poll_master dictates each run. */
+void *poll_worker_thread(void* inarg) {
+	struct sig_sub *sig_sub = inarg;
+	struct sig_data *sig_data = sig_sub->ownr;
+	struct sig_def *sig_def = &(sig_sub->ownr->ownr->sig_def);
+
+	memset(sig_sub->val,0,VAL_STR_MAX);
+	snprintf(sig_sub->val,VAL_STR_MAX,"%d",0);
+	int rc,cnt = 0;
+
+	while(1) {
+		INFO(("--> Worker %d starts (nr: %d for line %d)\n",
+					sig_sub->id,
+					sig_sub->sub_id,
+					sig_def->id));
+
+		INFO(("--> Worker %d will wait for sync...\n",sig_sub->id));
+		inc_waiting1(1);
+		/* Main sync point. Wait here. */
+		assert_ext(sem_wait(&workers_start_barrier) == 0);
+		inc_waiting1(-1);
+		INFO(("--> Worker %d in sync. Continues...\n",sig_sub->id));
+
+		DUSLEEP(MEDIUM);
+
+		/* Clear last value */
+		memset(sig_sub->val,0,VAL_STR_MAX);
+
+		rc=poll_fdata(sig_sub, cnt);
+		assert(rc==0);
 
 		if (!rc) {
 			cnt++;

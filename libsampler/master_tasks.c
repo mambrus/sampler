@@ -33,6 +33,101 @@
 #include "sigstruct.h"
 #include "local.h"
 
+static char *get_signame(const char *fname, char *buf, int *ret_len) {
+	FILE *f;
+
+	f = fopen(fname, "r");
+	assert_ext(f);
+	if (!f){
+		if (ret_len)
+			*ret_len = 0;
+		return NULL;
+	}
+	memset(buf, 0, NAME_STR_MAX);
+	fgets(buf, NAME_STR_MAX, f);
+	fclose(f);
+
+	/* fgets should have done this already, but just to be
+	 * safe: */
+	buf[NAME_STR_MAX-1]='\0';
+
+	/* Get rid of last LF is such exists */
+	if (buf[strlen(buf) -1] == '\n')
+		buf[strlen(buf) -1] = '\0';
+
+	if (ret_len)
+		*ret_len = strlen(buf);
+
+	if (strlen(buf)) {
+		return buf;
+	}
+	return NULL;
+}
+
+/* Output first line describing the contents of each columns. These strings
+ * will be be used as legends in plotting software */
+void outputlegends( void ) {
+	int j,from_file=0;
+	struct node *np;
+	struct sig_sub *sig_sub;
+	struct sig_data *sig_data;
+	struct sig_def *sig_def;
+	struct smpl_signal *smpl_signal;
+	char *tname;
+	char tname_buff[NAME_STR_MAX];
+
+	/* All modglobals are finalized by now. It's safe to use them */
+	handle_t list = samplermod_data.list;
+
+	if (samplermod_data.dolegend) {
+		printf("Time-now%cTSince-last",
+				samplermod_data.delimiter);
+
+		for(np=mlist_head(list); np; np=mlist_next(list)){
+			assert(np->pl);
+
+			smpl_signal=(struct smpl_signal *)(np->pl);
+			sig_data=&((*smpl_signal).sig_data);
+			sig_def=&((*smpl_signal).sig_def);
+
+			if (sig_def->fname && strnlen(sig_def->fname, NAME_STR_MAX)) {
+				from_file = 1;
+				tname =sig_def->fname;
+			} else {
+				from_file = 0;
+				tname =sig_def->name;
+			}
+
+			assert_ext(tname && strnlen(tname, NAME_STR_MAX) &&
+				("Symbolic name and file where to get it from can't both be nil" !=
+				 NULL)
+			);
+
+			if (sig_data->nsigs > 1) {
+				for(j=0; j<sig_data->nsigs; j++){
+					sig_sub=&((sig_data->sigs)[j]);
+				}
+			} else {
+				if (from_file) {
+					printf("%c%s",
+						samplermod_data.delimiter,
+						get_signame(
+							tname,tname_buff, NULL)
+					);
+				} else {
+					printf("%c%s",
+						samplermod_data.delimiter,
+						tname
+					);
+				}
+			}
+		}
+
+		printf("\n");
+		fflush(stdout);
+	}
+}
+
 /* Output in format according to settings */
 void output(int cid, const char *val, int always ) {
 	int wa = 0;
@@ -41,8 +136,8 @@ void output(int cid, const char *val, int always ) {
 	volatile static int face_cntr = 0;
 	volatile static int wut_cntr = 0;
 
-	face_cntr++;;
-	wut_cntr++;;
+	face_cntr++;
+	wut_cntr++;
 	if ( always && !(val[0]>='-' && val[0]<='z') ){
 		if (always != 1) {
 			fprintf(stderr, "ERROR: must print but have nothing"
@@ -89,22 +184,22 @@ static void ondataempty(int cid, const struct sig_sub* sig_sub) {
 			output(cid, samplermod_data.presetval ,1);
 			break;
 		case Nothing:
-		cefault:
+		default:
 			output(cid, "", 0);
 	}
 }
 
 static void collect_and_print(const handle_t list){
 	int rc,i,j;
-	struct node *n;
+	struct node *np;
 	struct sig_sub *sig_sub;
 	struct sig_data *sig_data;
 	struct smpl_signal *smpl_signal;
 
-	for(n=mlist_head(list); n; n=mlist_next(list)){
-		assert(n->pl);
+	for(np=mlist_head(list); np; np=mlist_next(list)){
+		assert(np->pl);
 
-		smpl_signal=(struct smpl_signal *)(n->pl);
+		smpl_signal=(struct smpl_signal *)(np->pl);
 		sig_data=&((*smpl_signal).sig_data);
 		for(j=0; j<sig_data->nsigs; j++){
 			sig_sub=&((sig_data->sigs)[j]);

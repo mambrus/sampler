@@ -34,11 +34,18 @@ struct samplermod_struct samplermod_data = {
 	.smplcntr = UINT64_MAX,
 	//.plotmode = driveGnuPlot,
 	.plotmode = feedgnuplot,
-	.presetval = "0",
-	.cid_offs = 2,
-	.delimiter = ';', .whatTodo = Lastval,/*Always Output something:
-											feedgnuplot compatible and error
-											detectable */
+	.delimiter = ';',
+	.verbose = 1,
+	.dolegend = 1,
+	//.dflt_worker = sinus_worker_thread,
+	.dflt_worker = poll_worker_thread,
+	//.dflt_task = sinus_data,
+	.dflt_task = poll_fdata,
+	.whatTodo = Lastval, /*Always Output something: feedgnuplot compatible
+						   and error detectable */
+
 /* Initialize helper variables */
 	.nworkers = 0,
+	.presetval = "0",
+	.cid_offs = 2,
 };

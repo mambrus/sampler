@@ -27,6 +27,9 @@
 #include <regex.h>
 #include <stdint.h>
 
+enum workertype { DFLT_WORKER, TEST_WORKER, POLL_WORKER };
+enum workertask { DFTLT_TASK, SINUS_TASK, POLL_TASK };
+
 /* Most data are strings representing some sort of numerical value (int,
  * floats of various sizes. This size is currently adapted to string
  * representation of max precision single floats:
@@ -35,45 +38,44 @@
  * be more than enough) */
 #define VAL_STR_MAX 25
 
+/* A sanity value for signal names. Used for out buffer in legends as this
+ * might have to be dynamic */
+#define NAME_STR_MAX 40
+
 /* Bit-values defining data-file operation per signal. Note that the final
-value 0 (i.e.  * no bit set) has a special meaning and can't be "OR":ed to be
-compared * only be compared with 0 */
+ * value 0 (i.e.  * no bit set) has a special meaning and can't be "OR":ed
+ * to be compared * only be compared with 0 */
 
 /* Best effort. Try to reopen if not existing.*/
 #define NOASSUMPTION    ((uint64_t)0<<0)
 
-/* Sampler will always close after read and reopen prior next read. Useful for
-files (normal data-files) that might have been renamed like normal log-files.*/
+/* Sampler will always close after read and reopen prior next read. Useful
+ * for files (normal data-files) that might have been renamed like normal
+ * log-files.*/
 #define OPENCLOSE       ((uint64_t)1<<0)
 
-/* File can block. For even-driven sampling this is one possible trigger.  I.e.
-one file getting ready to deliver drivers the event even if files that can't
-block gets read. In such case whether or not data gets delivered depends on if
-the file has support or utime. If more than one blocking files are part of a
-configuration, the ones still blocked will not be asked to deliver data. */
+/* File can block. For event-driven sampling this is one possible trigger.
+ * I.e. one file getting ready to deliver, drivers the event even if files
+ * that can't block gets read. In such case whether or not data gets
+ * delivered depends on if the file has support or utime. If more than one
+ * blocking files are part of a sample-configuration, the ones still blocked
+ * will not be asked to deliver data. */
 #define CANBLOCK        ((uint64_t)1<<1)
+
+/* This is for files that can stay open but which needs rewinding. Typical
+ * example would be persistent files in sysfs. Warning, use this modality
+ * with care. It's an optimization setting and many files in sysfs actually
+ * do cease to exist from time to time */
+#define REWIND          ((uint64_t)1<<2)
 
 /*File must exist and always deliver data. Failure doing so terminates
 execution */
 #define ALWAYS          ((uint64_t)1<<31)
 
-/* Enumeration to help determine combination of blocking state. Mostly not
- * useful and entries night be missing, but has it's usefulness when
- * debugging */
-enum persist {
-	automagic         = NOASSUMPTION,
-	notpersistent     = OPENCLOSE,
-	eventdriver       = CANBLOCK,
-	canblock          = CANBLOCK |  OPENCLOSE,
-	sentinel = UINT32_MAX   /*Assures enum will always be represented in at
-							  least this number of bits (even if members
-							  them self are still interpreted and limited to
-							  "int")*/
-};
-/* Hmm, above this is probably a crappy attempt and would scale enormously
-badly if covering more than a few bits.*/
 
-/* Calling "persistence" for file-operation mode instead as it's more generic*/
+/* File operation mode. Determines how each signal corresponding file
+ * behaves, implicitly what it can be done with it, is expected to behave
+ * and what to do if if doesn't */
 union fopmode {
 	uint32_t	mask; /* Clean access, works always */
 
@@ -87,6 +89,7 @@ union fopmode {
 	struct {
 		uint32_t openclose  : 1;
 		uint32_t canblock   : 1;
+		uint32_t rewind     : 1;
 		uint32_t __pad1     : 29;
 		uint32_t always     : 1;
 	} __attribute__((__packed__,aligned (4))) bits;
@@ -119,7 +122,7 @@ struct sig_def {
 #define SNAME	1 /* Signal name (symbolic)                               */
 #define SFNAME	2 /* Signal name from file                                */
 #define SFDATA	3 /* Data-file name                                       */
-#define SPERS	4 /* Datafile persistence                                 */
+#define SFOPMOD	4 /* Datafile persistence                                 */
 #define SRGXL	5 /* Regexp identifying which line to parse               */
 #define SRGXS	6 /* Signal regex                                         */
 #define SIDXS	7 /* Sub-match index                                      */
@@ -146,6 +149,8 @@ struct sig_sub {
 							   updating:
 							   Periodic: Data-file stopped existing or error
 							   Event: Not updated since last run, or error */
+	enum workertype work;   /* What kind of worker this is */
+	enum workertask task;   /* What the workers main task is (if applicable) */
 };
 
 /* Structure containing data to be harvested on each iteration */
@@ -165,5 +170,4 @@ struct smpl_signal {
 	struct sig_def sig_def;
 	struct sig_data sig_data;
 };
-
 #endif /* sigstruct_h */

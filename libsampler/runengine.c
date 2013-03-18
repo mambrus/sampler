@@ -87,6 +87,7 @@ int create_executor(handle_t list) {
 	struct sig_sub *sig_sub;
 	struct sig_data *sig_data;
 	struct smpl_signal *smpl_signal;
+	void *(*worker_thread_fkn)(void*);
 
 	/* Store list for threads to pick-up */
 	samplermod_data.list = list;
@@ -103,6 +104,12 @@ int create_executor(handle_t list) {
 		sig_data=&((*smpl_signal).sig_data);
 		for(j=0; j<sig_data->nsigs; j++){
 			sig_sub=&((sig_data->sigs)[j]);
+
+			switch (sig_sub->work){
+				default:
+					worker_thread_fkn=samplermod_data.dflt_worker;
+			}
+
 			INFO(("*** Starting worker %d (nr: %d for line %d)\n",
 					sig_sub->id,
 					sig_sub->sub_id,
@@ -111,13 +118,16 @@ int create_executor(handle_t list) {
 			rc=pthread_create(
 				&sig_sub->worker,
 				NULL,
-				poll_worker_thread,
+				worker_thread_fkn,
 				sig_sub
 			);
 			assert(rc==0);
 			assert(samplermod_data.nworkers++<100); //Sanity-check,
 		}
 	}
+
+	/* All is ready to start, output legends if needed */
+	outputlegends();
 
 	rc=pthread_create(
 		&sig_data->master,
@@ -126,11 +136,12 @@ int create_executor(handle_t list) {
 		sig_data
 	);
 	assert(rc==0);
+
 	while(1){
 		/* Really should joint the threads. But good for now. Root thread
 		 * will handle stdin, whilst poll_master_thread  handles output.*/
 		DUSLEEP(MEDIUM);
-		sleep(1);
+		usleep(25000);
 		fflush(stdout);
 	}
 }

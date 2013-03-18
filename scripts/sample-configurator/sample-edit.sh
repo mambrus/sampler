@@ -13,6 +13,8 @@ function file_to_vars() {
 }
 
 function signal_selector() {
+	echo "Script not finished (TBD)"
+	exit
 }
 
 function sample-configurator.sample-edit() {
