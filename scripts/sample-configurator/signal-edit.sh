@@ -12,10 +12,12 @@ function file_to_vars() {
 	sname="$(pline_1 $1 $(( 1 + $2 )) )"
 	nfile="$(pline_1 $1 $(( 2 + $2 )) )"
 	dfile="$(pline_1 $1 $(( 3 + $2 )) )"
-	pers="$(pline_1  $1 $(( 4 + $2 )) )"
+	fops="$(pline_1  $1 $(( 4 + $2 )) )"
 	lpatt="$(pline_1 $1 $(( 5 + $2 )) )"
-	spatt="$(pline_1 $1 $(( 6 + $2 )) )"
-	indxs="$(pline_1 $1 $(( 7 + $2 )) )"
+	lindex="$(pline_1 $1 $(( 6 + $2 )) )"
+	spatt="$(pline_1 $1 $(( 7 + $2 )) )"
+	indxs="$(pline_1 $1 $(( 8 + $2 )) )"
+	nucode="$(pline_1 $1 $(( 9 + $2 )) )"
 }
 
 function sample-configurator.signal-edit() {
@@ -41,10 +43,12 @@ function sample-configurator.signal-edit() {
 	sname=""
 	nfile=""
 	dfile=""
-	pers=""
+	fops=""
 	lpatt=""
+	lindex=""
 	spatt=""
 	indxs=""
+	nucode=""
 
 	if [ "X${INOUT_FILE}" != "X" ]; then
 		file_to_vars "${INOUT_FILE}" 0
@@ -68,10 +72,12 @@ function sample-configurator.signal-edit() {
 			"Name (symbolic):"         1 1	"$sname" 	1 $xofs 40 $xmax \
 			"Name (from filename):"    2 1	"$nfile"  	2 $xofs 80 $xmax \
 			"File:"                    3 1	"$dfile"  	3 $xofs 80 $xmax \
-			"Persistance:"             4 1	"$pers" 	4 $xofs 1 $xmax \
+			"File operation (hex):"    4 1	"$fops" 	4 $xofs 4  $xmax \
 			"Line pattern:"            5 1	"$lpatt" 	5 $xofs 80 $xmax \
-			"Signal pattern:"          6 1	"$spatt" 	6 $xofs 80 $xmax \
-			"Mach index(s):"           7 1	"$indxs" 	7 $xofs 20 $xmax \
+			"Line match index:"        6 1	"$lindex" 	6 $xofs 3  $xmax \
+			"Signal pattern:"          7 1	"$spatt" 	7 $xofs 80 $xmax \
+			"Mach index(s):"           8 1	"$indxs" 	8 $xofs 20 $xmax \
+			"No update behaviour:"     9 1	"$nucode" 	9 $xofs 1  $xmax \
 		2>$(tmpname)
 		RC=$?
 

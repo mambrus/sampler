@@ -1,5 +1,9 @@
-Auto create files from the scripts like this:
+Auto create files from native fragments in ready-made directories using
+sigdef_pack.sh
 
-for F in scripts/sample-configurator/test/*sig; \
-	do (cat $F | awk '{printf("%s;",$0);}'); \
-	echo ; done | sed -e 's/;$//' > testrc/thermal_1.ini
+To reverse (i.e. transform files in this directory into editable signal
+definitions), use sigdef_unpack.sh
+
+To edit an idividual signal definition use signal-edit.sh -f mysig.sig
+
+All scripts accept -h for help

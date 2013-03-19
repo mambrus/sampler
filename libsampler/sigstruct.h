@@ -62,20 +62,27 @@ enum workertask { DFTLT_TASK, SINUS_TASK, POLL_TASK };
  * will not be asked to deliver data. */
 #define CANBLOCK        ((uint64_t)1<<1)
 
+/* File can trigger event */
+#define TRIGGER         ((uint64_t)1<<2)
+
+/* File is "timed", i.e. updates are recorded and file has support for
+ * st_mtime */
+#define TIMED           ((uint64_t)1<<3)
+
 /* This is for files that can stay open but which needs rewinding. Typical
  * example would be persistent files in sysfs. Warning, use this modality
  * with care. It's an optimization setting and many files in sysfs actually
  * do cease to exist from time to time */
-#define REWIND          ((uint64_t)1<<2)
+#define REWIND          ((uint64_t)1<<4)
 
 /*File must exist and always deliver data. Failure doing so terminates
 execution */
 #define ALWAYS          ((uint64_t)1<<31)
 
 
-/* File operation mode. Determines how each signal corresponding file
- * behaves, implicitly what it can be done with it, is expected to behave
- * and what to do if if doesn't */
+/* File operation mode. Determines how each signal's corresponding file
+ * behaves. Implicitly what can be done with it, how it's expected to behave
+ * and how it can alter a samples temporal domain */
 union fopmode {
 	uint32_t	mask; /* Clean access, works always */
 
@@ -89,8 +96,10 @@ union fopmode {
 	struct {
 		uint32_t openclose  : 1;
 		uint32_t canblock   : 1;
+		uint32_t trigger    : 1;
+		uint32_t timed      : 1;
 		uint32_t rewind     : 1;
-		uint32_t __pad1     : 29;
+		uint32_t __pad1     : 26;
 		uint32_t always     : 1;
 	} __attribute__((__packed__,aligned (4))) bits;
 };
