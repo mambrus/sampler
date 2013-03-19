@@ -51,6 +51,8 @@
 #endif
 
 #define BUF_MAX 1024
+#define MAX_SUBLINES 1024
+#define MAX_MTCH_PERLINE 16
 
 int sinus_data(struct sig_sub* sig_sub, int cnt) {
 	float x;
@@ -107,9 +109,19 @@ int poll_fdata(struct sig_sub* sig_sub, int cnt) {
 		 strnlen(sig_def->rgx_line.str, BUF_MAX) == 0)
 	{
 		/* Simple case. Whole file or first line contains data */
+		/* Need to replace this with read for whole file parsing if special
+		 * cases are satisfied (TBD) */
 		fgets(buf, BUF_MAX, tfile);
 	} else {
-		assert_ext("Can't handle regex for selecting lines yet (TBD)" == NULL);
+		int i,j,k = sig_def->lindex, found=0;
+		for (i=0,j=0; i<MAX_SUBLINES && !found; i++) {
+			fgets(buf, BUF_MAX, tfile);
+			if (regexec(&sig_def->rgx_line.rgx, buf, 0, NULL, 0) == 0) {
+				/* There is a match, but is it the n'th one? */
+				j++;
+				found = (j==k);
+			}
+		}
 	}
 
 	if ( !sig_def->rgx_sig.str ||
@@ -121,25 +133,24 @@ int poll_fdata(struct sig_sub* sig_sub, int cnt) {
 			buf[strlen(buf) -1] = '\0';
 		strncpy(sig_sub->val, buf, VAL_STR_MAX);
 	} else {
-		assert_ext("Can't handle regex on lines yet (TBD)" == NULL);
-	}
+		int rc;
+		regmatch_t mtch_idxs[MAX_MTCH_PERLINE+1];
+		char err_str[80];
 
-#ifdef never
-/*
-	int regexec(const regex_t *preg, const char *string, size_t nmatch,
-					regmatch_t pmatch[], int eflags);
-*/
-	rc=regexec(&preg, tstr, 80,
-					mtch_idxs, /*REG_NOTBOL|REG_NOTEOL*/ 0);
-	if (rc) {
-		regerror(rc, &preg, estr, 80);
-		fprintf(stderr, "Regcomp faliure: %s\n", estr);
-		exit(1);
+		rc=regexec(&sig_def->rgx_sig.rgx, buf, MAX_MTCH_PERLINE+1, mtch_idxs, 0);
+		if (rc) {
+			regerror(rc, &sig_def->rgx_sig.rgx, err_str, 80);
+			fprintf(stderr, "Regexec faliure: %s\n", err_str);
+			return(rc);
+		} else {
+			/*Note: The correct idx to match against is stored in sig_def*/
+			int idx = sig_def->idxs[sig_sub->sub_id];
+			strncpy(
+				sig_sub->val,
+				&buf[mtch_idxs[idx].rm_so],
+				mtch_idxs[idx].rm_eo - mtch_idxs[idx].rm_so);
+		}
 	}
-	so=mtch_idxs[n].rm_so;
-	eo=mtch_idxs[n].rm_eo;
-	strncpy(rstr, &(tstr[so]), eo-so)
-#endif
 
 	/*Close the file but not the descriptor*/
 	fclose(tfile);

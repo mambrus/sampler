@@ -15,7 +15,7 @@ echo "Staring shabang. log-file available for: tail -f /tmp/sampler.log"
 LEGEND='--legend 0 "Period_time"'
 
 PERIOD=${1-"100"}
-sudo LD_LIBRARY_PATH=/home/mambrus/lib ./sampler testrc/thermal_1.ini $PERIOD | \
+./sampler testrc/thermal_proc.ini $PERIOD | \
 	awk -F";" '
 		BEGIN{
 			first=1
@@ -26,7 +26,7 @@ sudo LD_LIBRARY_PATH=/home/mambrus/lib ./sampler testrc/thermal_1.ini $PERIOD | 
 		}
 		NR>2{
 			printf("%s;%s;%s:%s\n",
-				$1-t0,$3/1000,$4/1000,$5/1000.0)
+				$1-t0,$3,$4,$5/1000.0)
 			fflush()
 		}' | tee /tmp/sampler.log | \
 		feedgnuplot \

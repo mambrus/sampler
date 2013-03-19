@@ -148,8 +148,7 @@ struct sig_def {
  * at least one */
 struct sig_sub {
 	struct sig_data *ownr;  /* Pointer back to the owner */
-	int id;                 /* "ID" of the signal. I.e which column it
-							   updates in the output. */
+	int id;                 /* "ID" of the signal. Per sample unique. */
 	int sub_id;				/* Which sub-signal this this (if sub-signals
 							   defined). 0 if no sub-signals */
 	char val[VAL_STR_MAX];  /* Read value */
