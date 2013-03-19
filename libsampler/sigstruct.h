@@ -121,8 +121,10 @@ struct sig_def {
 	char *fdata;			/* Data-file name */
 	union fopmode fopmode;	/* Datafile op-mode (sub-signals shares this)*/
 	struct regexp rgx_line;	/* Regex identifying line to parse */
+	int  lindex;			/* n'th line index. '1'=first, '0'=special */
 	struct regexp rgx_sig;	/* Signal regex */
 	int  *idxs;				/* Sub-match index */
+	int  nuce;				/* "Not updated" behaviour code*/
 };
 
 /* Field indexes in definition line. If more data added, add to end to avoid
@@ -131,10 +133,12 @@ struct sig_def {
 #define SNAME	1 /* Signal name (symbolic)                               */
 #define SFNAME	2 /* Signal name from file                                */
 #define SFDATA	3 /* Data-file name                                       */
-#define SFOPMOD	4 /* Datafile persistence                                 */
+#define SFOPMOD	4 /* Datafile modality (32-bit bit-mask code)             */
 #define SRGXL	5 /* Regexp identifying which line to parse               */
-#define SRGXS	6 /* Signal regex                                         */
-#define SIDXS	7 /* Sub-match index                                      */
+#define SLIDX	6 /* N'th line index match (positive int)                 */
+#define SRGXS	7 /* Signal regex                                         */
+#define SIDXS	8 /* Sub-match index                                      */
+#define SNUCE	9 /* "Not updated" behavior code (positive int)           */
 
 /* Constant string to use as default output if no update has occurred. To be
  * set specifically to help debug race conditions or other harvest errors*/

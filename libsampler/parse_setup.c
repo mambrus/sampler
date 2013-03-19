@@ -50,14 +50,16 @@
 ([[:alnum:] _/,]*);\
 ([[:alnum:] _/,]*);\
 ([[:print:]]*);\
+([0-9]*);\
 ([[:print:]]*);\
-([[:alnum:] _/,]*)\
+([[:alnum:] _/,]*);\
+([0-9]*)\
 $"
 
 /* Number of sub-expressions. NOTE: Very important to match this with
  * DFN_LINE. If regex is written with more subexpressions than columns it
  * has to be adjusted here */
-#define MAX_DFN_COLUMNS 7
+#define MAX_DFN_COLUMNS 9
 
 /* Max length of a definition input-line */
 #define MAX_DFN_LINE_LEN 1024
@@ -102,26 +104,33 @@ static int parse_dfn_line(const regex_t *preg, char *line, struct smpl_signal *r
 	}
 
 	/* Loop trough input-line and put '\0' everywhere where pattern ends.
-	 * Note that index=0 matches the compete pattern. I.e. add +1 */
+	 * Note that index=0 matches the complete pattern. I.e. add +1 */
 	for (i=1; i<=MAX_DFN_COLUMNS; i++) {
 		line[mtch_idxs[i].rm_eo]=0;
 		INFO(("%02d: %s\n", i, &(line[mtch_idxs[i].rm_so])));
 	}
 
-	rsig->sig_def.id			= lno;
-	rsig->sig_def.name			= strdup(&(line[mtch_idxs[SNAME].rm_so]));
-	rsig->sig_def.fname			= strdup(&(line[mtch_idxs[SFNAME].rm_so]));
-	rsig->sig_def.fdata			= strdup(&(line[mtch_idxs[SFDATA].rm_so]));
-	rsig->sig_def.fopmode.mask	= atoi(&(line[mtch_idxs[SFOPMOD].rm_so]));
+	rsig->sig_def.id           = lno;
+	rsig->sig_def.name         = strdup(&(line[mtch_idxs[SNAME].rm_so]));
+	rsig->sig_def.fname        = strdup(&(line[mtch_idxs[SFNAME].rm_so]));
+	rsig->sig_def.fdata        = strdup(&(line[mtch_idxs[SFDATA].rm_so]));
+	rsig->sig_def.fopmode.mask = atoi(&(line[mtch_idxs[SFOPMOD].rm_so]));
+	rsig->sig_def.lindex       = atoi(&(line[mtch_idxs[SLIDX].rm_so]));
+	rsig->sig_def.nuce         = atoi(&(line[mtch_idxs[SNUCE].rm_so]));
 
-	INFO(("Size of fopmode: %u\nFile operation bits:\n"
+	INFO(("Size of fopmode in bytes (should be 4): %u\n"
+			"File operation bits:\n"
 			"   openclose:%d\n"
 			"   canblock:%d\n"
+			"   trigger:%d\n"
+			"   timed:%d\n"
 			"   rewind:%d\n"
 			"   always:%d\n",
 			(uint32_t)sizeof(union fopmode),
 			rsig->sig_def.fopmode.bits.openclose,
 			rsig->sig_def.fopmode.bits.canblock,
+			rsig->sig_def.fopmode.bits.trigger,
+			rsig->sig_def.fopmode.bits.timed,
 			rsig->sig_def.fopmode.bits.rewind,
 			rsig->sig_def.fopmode.bits.always
 	));
