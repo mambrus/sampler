@@ -1,7 +1,7 @@
 sampler
 =======
 
-Produces periodic samples gathered from files any target system. Typical
+Produces periodic samples gathered from files on target system. Typical
 files would be files from sysfs, procfs, devfs but also normal files like
 log-files.
 

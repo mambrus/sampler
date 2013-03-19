@@ -1,7 +1,7 @@
 Chapter 0.0: SAMPLER
 ====================
 
-Produces periodic samples gathered from files any target system. Typical
+Produces periodic samples gathered from files on target system. Typical
 files would be files from sysfs, procfs, devfs but also normal files like
 log-files.
 
@@ -134,9 +134,16 @@ Chapter 1.1: FIELD DESCRIPTIONS
        output always falls back on #9
 
     5: REWIND File that has OPENCLOSE unset can stay open between events to
-    optimize sample harvest. However, some files might never the less need
-    to be rewind (i.e. lseek(fd, 0 SEEK_SET)) before willing to give updated
-    data. This applies to most files under sysfs.
+       optimize sample harvest. However, some files might never the less
+       need to be rewind (i.e. lseek(fd, 0 SEEK_SET)) before willing to
+       give updated data. This applies to most files under sysfs.
+
+   31: ALWAYS assert file existence. I.e. framework assumes it always
+       does and fails execution if it does not. This would be recommended
+       if OPENCLOSE is not set for files in sysfs that can come and go
+       depending on the HW plug-in framework. cpu-up/cpu-down affected
+       files would be a typical example when you would like to have this
+       enabled. If uncertain, always set of OPENCLOSE is unset.
 
 5 Regex identifying line to parse.
 -----------------------------------
