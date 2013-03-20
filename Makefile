@@ -59,8 +59,8 @@ uninstall:
 
 ${INSTALLDIR}/bin/${LOCAL_MODULE}: $(LOCAL_MODULE)
 	mkdir -p ${INSTALLDIR}/bin
-	rm -f ${INSTALLDIR}/${LOCAL_MODULE}
-	cp $(LOCAL_MODULE) ${INSTALLDIR}/${LOCAL_MODULE}
+	rm -f ${INSTALLDIR}/bin/${LOCAL_MODULE}
+	cp $(LOCAL_MODULE) ${INSTALLDIR}/bin/${LOCAL_MODULE}
 
 tags: $(shell ls *.[ch])
 	ctags --options=.cpatterns --exclude=@.cexclude -o tags -R *

@@ -61,14 +61,14 @@ clean:
 	rm -f $(LOCAL_MODULE)
 	rm -f tags
 
-install: ${INSTALLDIR}/lib/${LOCAL_MODULE} ${INSTALLDIR}/${EXHEADERS}
+install: ${INSTALLDIR}/${LOCAL_MODULE} ${INSTALLDIR}/${EXHEADERS}
 
 uninstall:
 	$(UNINST_MODS)
-	rm -rf ${INSTALLDIR}/lib/${LOCAL_MODULE}
+	rm -rf ${INSTALLDIR}/${LOCAL_MODULE}
 	bash -c '${INSTALLDIR}; rm ${EXHEADERS}'
 
-${INSTALLDIR}/lib/${LOCAL_MODULE}: build
+${INSTALLDIR}/${LOCAL_MODULE}: build
 	mkdir -p ${INSTALLDIR}/lib
 	rm -f ${INSTALLDIR}/${LOCAL_MODULE}
 	cp $(LOCAL_MODULE) ${INSTALLDIR}/${LOCAL_MODULE}
