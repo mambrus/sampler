@@ -1,0 +1,15 @@
+[submodule "doc/wikidata"]
+	path = doc/wikidata
+	url = https://github.com/mambrus/wikidata_sampler.git
+[submodule "lib/libmqueue"]
+	path = lib/libmqueue
+	url = https://github.com/mambrus/clib-mqueue.git
+[submodule "lib/liblog"]
+	path = lib/liblog
+	url = https://github.com/mambrus/liblog
+[submodule "lib/libmlist"]
+	path = lib/libmlist
+	url = https://github.com/mambrus/libmlist
+[submodule "lib/libmtime"]
+	path = lib/libmtime
+	url = https://github.com/mambrus/libmtime
