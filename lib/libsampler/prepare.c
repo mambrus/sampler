@@ -32,7 +32,7 @@
 #include <sys/inotify.h>
 #include <sys/prctl.h>
 #include <sys/types.h>
-#ifndef HAVE_ANDROID_OS
+#ifndef __ANDROID__
 #include <sys/capability.h>
 int capset(cap_user_header_t hdrp, const cap_user_data_t datap);
 #endif
@@ -80,7 +80,7 @@ if ( sampler_setting.prio_##S != INT_MAX )                                     \
 /* Pre-check if requested run-settings are reasonable or even possible*/
 static int check_rt_settings() {
 	int uid, euid;
-#ifndef HAVE_ANDROID_OS
+#ifndef __ANDROID__
 	cap_t cap;
 	cap = cap_init();
 #endif
@@ -150,7 +150,7 @@ static int check_rt_settings() {
 			return -1;
 		}
 	}
-#ifndef HAVE_ANDROID_OS
+#ifndef __ANDROID__
 	cap = cap_get_proc();
 	if (sampler_setting.verbose) {
 		INFO(("Running with capabilities: %s\n", cap_to_text(cap, NULL)));

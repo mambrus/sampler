@@ -79,7 +79,7 @@ FILE *proc_subst_in(char *cmds);
  * the same console. Makes no sense for Android as the logging mechanism
  * works differently there.
  * */
-#if !defined(HAVE_ANDROID_OS)
+#if !defined(__ANDROID__)
 # define BUF_FRMTR "\n{%s}\n"
 #else
 # define BUF_FRMTR "%s"
@@ -93,7 +93,7 @@ FILE *proc_subst_in(char *cmds);
 		} \
 	}
 
-#if !defined(HAVE_ANDROID_OS) && !defined(NO_TIME_PID_LOG)
+#if !defined(__ANDROID__) && !defined(NO_TIME_PID_LOG)
 # define USE_TIME_AND_PID_IN_LOG
 #endif
 

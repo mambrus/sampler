@@ -71,7 +71,7 @@
 #define USE_SIG_ARRAY 'n'
 #endif
 
-#if !defined(HAVE_ANDROID_OS)
+#if !defined(__ANDROID__)
 # define BUF_FRMTR "\n{%s}\n"
 #else
 # define BUF_FRMTR "%s"
