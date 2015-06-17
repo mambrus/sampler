@@ -104,8 +104,6 @@ include_directories("${PROJECT_BINARY_DIR}")
 
 set(SAMPLER_SOURCE
 	sampler.c
-	opts.c
-	opts_help.c
 )
 
 install(PROGRAMS ${PROJECT_BINARY_DIR}/sampler DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
