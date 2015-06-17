@@ -21,7 +21,7 @@
 #include <mlist.h>
 #include <stdio.h>
 #include <assert.h>
-#include "assert_np.h"
+#include <assure.h>
 #include <unistd.h>
 #include <time.h>
 #include <sys/times.h>
@@ -286,7 +286,7 @@ void harvest_sample(const handle_t list) {
 		END_RD(&sampler_data.sampler_data_lock)
 
 		BEGIN_WR(&sampler_data.diag_lock)
-			assert_ign(time_now(&tnow) == 0);
+			assert_np(time_now(&tnow) == 0);
 			sampler_data.diag.texec=tv_diff_us(tstart,tnow);
 
 			if (first) {

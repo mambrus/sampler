@@ -34,7 +34,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <assert.h>
-#include "assert_np.h"
+#include <assure.h>
 #include <limits.h>
 #include <regex.h>
 #include <parsers.h>

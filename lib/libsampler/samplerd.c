@@ -21,7 +21,7 @@
 #include <assert.h>
 #include <sampler.h>
 #include <mlist.h>
-#include "assert_np.h"
+#include <assure.h>
 #include "local.h"
 #include <limits.h>
 #include <stdlib.h>

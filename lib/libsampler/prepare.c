@@ -22,7 +22,7 @@
 
 #include <stdio.h>
 #include <assert.h>
-#include "assert_np.h"
+#include <assure.h>
 #include <unistd.h>
 #include <string.h>
 #include <math.h>

@@ -29,7 +29,7 @@
 #include <time.h>
 #include <errno.h>
 #include <assert.h>
-#include "assert_np.h"
+#include <assure.h>
 #include <limits.h>
 #define LDATA struct smpl_signal
 #include <mlist.h>

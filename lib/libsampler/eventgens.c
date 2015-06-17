@@ -22,7 +22,7 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <assert.h>
-#include "assert_np.h"
+#include <assure.h>
 #include <unistd.h>
 #include <limits.h>
 #include <string.h>

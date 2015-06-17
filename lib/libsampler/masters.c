@@ -38,7 +38,7 @@
 #include <mlist.h>
 #include <stdio.h>
 #include <assert.h>
-#include "assert_np.h"
+#include <assure.h>
 #include <unistd.h>
 #include <string.h>
 #include <math.h>
@@ -107,7 +107,7 @@ void *poll_master_thread(void* inarg) {
 
 	qattr.mq_maxmsg = 100;
 	qattr.mq_msgsize = sizeof (struct val_msg);
-	assert_ign(mlist_dup(&tlist, list) == 0);
+	assert_np(mlist_dup(&tlist, list) == 0);
 	for(np=mlist_head(tlist); np; np=mlist_next(tlist)){
 		struct smpl_signal *smpl_signal;
 		struct sig_data *sig_data;
@@ -130,7 +130,7 @@ void *poll_master_thread(void* inarg) {
 			}
 		}
 	}
-	assert_ign(mlist_close(tlist) == 0);
+	assert_np(mlist_close(tlist) == 0);
 
 
 	if ((sampler_setting.prio_master != INT_MAX) ||
@@ -165,7 +165,7 @@ void *poll_master_thread(void* inarg) {
 		/* Run event received. Time-stamp as early as possible. This stamp
 		   represents the complete group of data as a "tag" */
 		BEGIN_WR(&sampler_data.sampler_data_lock)
-			assert_ign(time_now(&sampler_data.tstarted) == 0);
+			assert_np(time_now(&sampler_data.tstarted) == 0);
 		END_WR(&sampler_data.sampler_data_lock)
 		master_lockstep(1,&q);
 		master_lockstep(2,&q);

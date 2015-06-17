@@ -36,7 +36,7 @@
 #include <mlist.h>
 #include <stdio.h>
 #include <assert.h>
-#include "assert_np.h"
+#include <assure.h>
 #include <unistd.h>
 #include <string.h>
 #include <math.h>
@@ -243,7 +243,7 @@ static int transfer_regmatch(struct sig_sub* sig_sub, const char *buf) {
 #else
 			struct node *n;
 			handle_t tmp_list;
-			assert_ign(mlist_dup(&tmp_list, sig_data->sub_list) == 0);
+			assert_np(mlist_dup(&tmp_list, sig_data->sub_list) == 0);
 
 			DBG_INF(7,("Picking values from buff (list-ver): "BUF_FRMTR,
 				buf));
@@ -267,7 +267,7 @@ static int transfer_regmatch(struct sig_sub* sig_sub, const char *buf) {
 						sig_def->idxs[j], buf));
 				}
 			}
-			assert_ign(mlist_close(tmp_list) == 0);
+			assert_np(mlist_close(tmp_list) == 0);
 #endif
 		}
 	}
@@ -288,11 +288,11 @@ static uint32_t sync_rbuff(int fd) {
 	FD_ZERO(&readfds);
 	FD_SET(fd, &readfds);
 
-	assert_ign(time_now(&t0) == 0);
+	assert_np(time_now(&t0) == 0);
 	assert_ext((
 		rc=select(FD_SETSIZE, &readfds, NULL, NULL, &tv)
 	) != -1);
-	assert_ign(time_now(&t1) == 0);
+	assert_np(time_now(&t1) == 0);
 	if (rc==0) {
 		return SELECT_TIMEOUT_USEC;
 	}
@@ -337,7 +337,7 @@ int logfile_fdata(struct sig_sub* sig_sub, int cnt) {
 		sig_sub->fd=open(sig_def->fdata, O_RDONLY);
 		rc=errno;
 		assert(sig_sub->fd != -1);
-		assert_ign((sig_sub->tfile = fdopen(sig_sub->fd, "r")) >= 0);
+		assert_np((sig_sub->tfile = fdopen(sig_sub->fd, "r")) >= 0);
 		sig_sub->fp_curr = 0;
 		sig_sub->fp_valid = 0;
 		sig_data->cleared_backlog=0;
@@ -641,7 +641,7 @@ int poll_fdata(struct sig_sub* sig_sub, int cnt) {
 		}
 	}
 
-	assert_ign((sig_sub->tfile = fdopen(sig_sub->fd, "r")) >= 0);
+	assert_np((sig_sub->tfile = fdopen(sig_sub->fd, "r")) >= 0);
 	if ( !sig_def->rgx_line.str ||
 		 strnlen(sig_def->rgx_line.str, BUF_MAX) == 0)
 	{

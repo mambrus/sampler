@@ -21,7 +21,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <string.h>
-#include "assert_np.h"
+#include <assure.h>
 #include <limits.h>
 #include "local.h"
 //#define PIPE_TEST_1
@@ -52,7 +52,7 @@ char *create_unique_name(){
 	char name[PATH_MAX]={'\0'};
 	struct timeval tno1;
 
-	assert_ign(time_now(&tno1) == 0);
+	assert_np(time_now(&tno1) == 0);
 
 	snprintf(name, PATH_MAX,
 		"%04d.%04d.%06d.%08d",

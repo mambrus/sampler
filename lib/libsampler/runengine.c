@@ -27,7 +27,7 @@
 #include <mlist.h>
 #include <stdio.h>
 #include <assert.h>
-#include "assert_np.h"
+#include <assure.h>
 #include <unistd.h>
 #include <string.h>
 #include <math.h>
@@ -248,7 +248,7 @@ int create_executor(handle_t list) {
 	assert_ext(sem_init(&sampler_data.pipes_complete, 0,
 		pipe_complete_startval) == 0);
 
-	assert_ign(!pthread_create(
+	assert_np(!pthread_create(
 		&sampler_data.master,
 		NULL,
 		poll_master_thread,
@@ -258,7 +258,7 @@ int create_executor(handle_t list) {
 	/* If periodical, create thread to produce time events with that
 	 * periodicity */
 	if (sampler_setting.ptime > 0)
-		assert_ign(!pthread_create(
+		assert_np(!pthread_create(
 			&sampler_data.timer_events,
 			NULL,
 			time_eventgen_thread,
@@ -270,7 +270,7 @@ int create_executor(handle_t list) {
 	if (sampler_data.files_monitored > 0) {
 		/*Make sure to empty any pending buffers first ting*/
 		assert_ext(sem_post(&sampler_data.master_event)== 0);
-		assert_ign(!pthread_create(
+		assert_np(!pthread_create(
 			&sampler_data.filesmon_events,
 			NULL,
 			filemon_eventgen_thread,
