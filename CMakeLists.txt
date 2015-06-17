@@ -4,37 +4,10 @@ project (sampler C)
 ################################################################################
 # Configuration options
 ################################################################################
-set(DEF_DEBUGFS_PATH
-	"/sys/kernel/debug"
-	CACHE STRING
-	"Default path to where debugfs is mounted")
 
-set(DEF_WORKDIR
-	"./"
-	CACHE STRING
-	"Default workdir/where output is placed")
-
-set(DEF_HTIME
-	"1000"
-	CACHE STRING
-	"Default harvest-time (uS)")
-
-set(DEF_PTIME
-	"1000"
-	CACHE STRING
-	"Default period-time (uS)")
-
-set(DEF_FTRACE_CLOCK
-	"local"
-	CACHE STRING
-	"ftrace_clock to use. Note: Valid ones depend on target.")
-
-set(DEF_FTRACE_BUFF_SIZE_KB
-	"10000"
-	CACHE STRING
-	"Size of each CPU trace buffer in kB.")
-
-#SET(BUILD_PARAVIEW_PLUGIN ON CACHE STRING "Build Paraview plugin?" FORCE)
+# This option is needed when building for other system than default for the
+# compiler.  This is usually the case for X-builds. I.e. this enables
+# Android NDK arm-gcc to be used also for chrome-book, rPI e.t.a.
 set(SYSROOT
 	${CMAKE_SYSROOT}
 	CACHE STRING
@@ -42,10 +15,14 @@ set(SYSROOT
 
 # Enable any liblog
 option(ENABLE_LOGGING
-    "Enable log messages." ON)
+	"Enable log messages."
+	ON)
 
+# Enable logging to pass-throgh to syslogd
 option(ENABLE_SYSLOG
-    "Enable log to syslog (Linux/OSX)" OFF)
+	"Enable log to syslog (Linux/OSX)"
+	ON)
+
 ################################################################################
 if (NOT SYSROOT STREQUAL "")
 	message( "** INFO: SYSROOT was either set or defaulted from toolchain file" )
