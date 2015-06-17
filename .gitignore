@@ -1,6 +1,5 @@
-sampler
-files.s3
 tags
+c-tags
 *.o
 *.d
 *.tmp
@@ -9,3 +8,4 @@ tags
 *.swp
 *.*~
 *.pyc
+BUILD*
