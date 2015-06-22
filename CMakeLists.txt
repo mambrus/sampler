@@ -9,8 +9,8 @@ project (sampler C)
 # compiler.  This is usually the case for X-builds. I.e. this enables
 # Android NDK arm-gcc to be used also for chrome-book, rPI e.t.a.
 set(SYSROOT
-	${CMAKE_SYSROOT}
-	CACHE STRING
+	${DETECTED_SYSROOT}
+	CACHE PATH
 	"System path (--system=)")
 
 # Enable any liblog
@@ -27,6 +27,7 @@ option(ENABLE_SYSLOG
 if (NOT SYSROOT STREQUAL "")
 	message( "** INFO: SYSROOT was either set or defaulted from toolchain file" )
 	set(CMAKE_SYSROOT "${SYSROOT}")
+	set(CMAKE_STAGING_PREFIX /tmp/cmake_stage/Android)
 	set(CMAKE_EXTRA_C_FLAGS "${CMAKE_EXTRA_C_FLAGS} --sysroot=${CMAKE_SYSROOT}")
 endif (NOT SYSROOT STREQUAL "")
 

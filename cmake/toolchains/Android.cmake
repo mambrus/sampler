@@ -1,30 +1,62 @@
 include (CMakeForceCompiler)
 set(CMAKE_SYSTEM_NAME Generic)
 
-set(HOME $ENV{HOME})
-set(CMAKE_SYSROOT ${HOME}/usr/local/android-ndk-r10d/platforms/android-21/arch-arm)
-set(CMAKE_STAGING_PREFIX /tmp/stage/Android)
+set(XTOOL_PREFIX
+	arm-linux-androideabi
+	CACHE STRING
+	"Cross compiler PREFIX in the format <CPUarchitecture>-<system>-<ABI>")
 
-# Todo: Can variable "tripple" be set from cmd-line even if it's declaration
-# is optionable?
-set(triple arm-linux-androideabi-)
-set(CMAKE_C_COMPILER_TARGET ${triple})
+set(X_PREFIX ${XTOOL_PREFIX}-)
 
-#set(CMAKE_C_COMPILER ${triple}gcc)
-#set(CMAKE_CXX_COMPILER ${triple}g++)
+find_program(GCC_EXECUTABLE ${XTOOL_PREFIX}-gcc)
 
-#Todo: Autodetect this by: ${triple}gcc -dM -E - < /dev/null | grep ANDROID
-set(ANDROID_TARGET "yes")
+if(NOT GCC_EXECUTABLE)
+	message( FATAL_ERROR  "Executable ${XTOOL_PREFIX}-gcc not in \$PATH. Can't continue.")
+endif(NOT GCC_EXECUTABLE)
 
-CMAKE_FORCE_C_COMPILER(${triple}gcc ${triple}gcc)
-CMAKE_FORCE_CXX_COMPILER(${triple}g++ ${triple}g++)
+
+set(CMAKE_C_COMPILER_TARGET ${X_PREFIX})
+
+execute_process(
+	COMMAND ${X_PREFIX}gcc -dM -E -
+	INPUT_FILE /dev/null
+	COMMAND grep ANDROID
+	OUTPUT_VARIABLE __ANDROID_TARGET_TEST
+)
+string(STRIP "${__ANDROID_TARGET_TEST}" ANDROID_TARGET_TEST)
+
+CMAKE_FORCE_C_COMPILER(${X_PREFIX}gcc ${X_PREFIX}gcc)
+CMAKE_FORCE_CXX_COMPILER(${X_PREFIX}g++ ${X_PREFIX}g++)
 
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 
-if (NOT ANDROID_TARGET STREQUAL "")
-	message( "## INFO: Build for Android target" )
-	set(CMAKE_EXTRA_C_FLAGS "${CMAKE_EXTRA_C_FLAGS} -fPIE -pie")
-endif (NOT ANDROID_TARGET STREQUAL "")
+if (NOT ANDROID_TARGET_TEST STREQUAL "")
+	set	(HAVE_ANDROID_OS_DEFAULT 1)
+	message(STATUS "Tool-chain can buld for Android: ${ANDROID_TARGET_TEST}" )
+endif (NOT ANDROID_TARGET_TEST STREQUAL "")
+
+set(HAVE_ANDROID_OS
+	${HAVE_ANDROID_OS_DEFAULT}
+	CACHE BOOL
+	"Is this build intended for a Android system?")
+
+if (HAVE_ANDROID_OS)
+	message(STATUS "Going to build for Android target" )
+	set(CMAKE_EXTRA_C_FLAGS "${CMAKE_EXTRA_C_FLAGS} -fPIE -pie -DHAVE_ANDROID_OS")
+
+# Autodetect SYSROOT in NDK
+	execute_process(
+		COMMAND which "${X_PREFIX}gcc"
+		OUTPUT_VARIABLE NDK_GCC_FULLPATH
+	)
+	execute_process(
+		COMMAND ${PROJECT_SOURCE_DIR}/cmake/host/android_sysroot.sh
+			${NDK_GCC_FULLPATH}
+			OUTPUT_VARIABLE __DETECTED_SYSROOT
+	)
+	string(STRIP "${__DETECTED_SYSROOT}" DETECTED_SYSROOT)
+endif (HAVE_ANDROID_OS)
+
