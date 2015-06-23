@@ -78,13 +78,6 @@ set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--undefined=__mqueue_i
 set (EXTRA_LIBS ${EXTRA_LIBS} libmqueue)
 
 ################################################################################
-# external libraries
-################################################################################
-if (NOT ANDROID_TARGET)
-	set (EXTRA_LIBS ${EXTRA_LIBS} cap)
-endif (NOT ANDROID_TARGET)
-
-################################################################################
 # Project
 ################################################################################
 # The version number.

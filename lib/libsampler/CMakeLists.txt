@@ -1,3 +1,4 @@
+INCLUDE (CheckLibraryExists)
 include_directories("${PROJECT_BINARY_DIR}")
 include_directories("${PROJECT_SOURCE_DIR}")
 
@@ -30,3 +31,10 @@ set(LIBSAMPLER_SOURCE
 )
 
 add_library(libsampler ${LIBSAMPLER_SOURCE})
+
+CHECK_LIBRARY_EXISTS(cap capset "" HAVE_LIB_CAP)
+if (HAVE_LIB_CAP)
+    target_link_libraries(libsampler cap)
+else (HAVE_LIB_CAP)
+    target_link_libraries(libsampler)
+endif (HAVE_LIB_CAP)
