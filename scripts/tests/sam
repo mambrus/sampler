@@ -1,0 +1,209 @@
+#!/bin/bash
+PACKAGE_NAME=SAMPLER-T
+PACKAGE_VERSION=20140924
+SAMPLER_DIR="$HOME/sampler"
+SYSTEM_SAMPLER_SPC="/opt/somc-sampler/share/etc"
+self=`basename $0`
+
+if [ ! -d "$SAMPLER_DIR" ]; then
+    mkdir "$SAMPLER_DIR"
+fi
+# Usage: usage
+# Print the usage.
+usage () {
+    cat <<EOF
+Usage: $self [OPTION]
+  -h, --help              print this message and exit
+  -v, --version           print the version information and exit
+
+Report bugs to <>.
+EOF
+}
+
+function pid()
+{
+   local EXE="$1"
+   if [ "$EXE" ] ; then
+       local PID=`adb shell ps | fgrep $1 | sed -e 's/[^ ]* *\([0-9]*\).*/\1/'`
+       echo "$PID"
+   else
+       echo "usage: pid name"
+   fi
+}
+
+function probe_device()
+{
+    max_freq=$(adb shell cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq|tr -d '\r')
+    n_cores=$(adb shell cat /proc/cpuinfo|tr -d '\r'|grep -E "processor.*:"|wc -l)
+    echo "Max CPU freq        : $max_freq"
+    echo "Number of cores     : $n_cores"
+}
+
+find_cfg_file()
+{
+    local cfg_file="$1"
+    if [ ! -f "$cfg_file" -a -f "$SAMPLER_DIR/$cfg_file" ]; then
+        cfg_file="$SAMPLER_DIR/$cfg_file"
+    elif [ ! -f "$cfg_file" -a -f "$SYSTEM_SAMPLER_SPC/$cfg_file" ]; then
+        cfg_file="$SYSTEM_SAMPLER_SPC/$cfg_file"
+    fi
+    echo "$cfg_file"
+}
+
+# To start sampler-plot we need: N core, max cpu freq
+plot-live() {
+    local usage_str="usage: [OPTION] CFG-FILE"
+    if test $# -lt 1; then
+        echo $usage_str
+        exit 1
+    fi
+    local -a args=( "$@" )
+    local cfg_file="${args[$#-1]}"
+    cfg_file=$(find_cfg_file "$cfg_file")
+    if [ ! -f "$cfg_file" ]; then
+        echo "Can't find \"$cfg_file\""
+        echo $usage_str
+        exit 1
+    fi
+
+    echo "Waiting for adb devices..."
+    adb wait-for-device
+    probe_device
+
+    sampler-plot "${args[@]:0:$#-1}" --signal cpu_freq_max expr "$max_freq" --signal cores expr "$n_cores" -c "$cfg_file"
+}
+
+# To start sampler-plot we need: N core, max cpu freq
+plot-file() {
+    local usage_str="usage: [OPTION] CFG-FILE SAMPLER-FILE"
+    if test $# -lt 2; then
+        echo $usage_str
+        exit 1
+    fi
+    local -a args=( "$@" )
+    local cfg_file="${args[$#-2]}"
+    cfg_file=$(find_cfg_file "$cfg_file")
+    if [ ! -f "$cfg_file" ]; then
+        echo "Can't find \"$cfg_file\""
+        echo $usage_str
+        exit 1
+    fi
+    local sampler_file="${args[$#-1]}"
+
+    # this data may be saved on file instead of probing again
+    local dev_cfg_file="${sampler_file}.dev_cfg"
+    if [ -f "$dev_cfg_file" ]; then
+        source "$dev_cfg_file"
+    else
+        echo "Unable to find device parameter file $dev_cfg_file."
+        echo "Please connect device with usb."
+        echo "Waiting for adb devices..."
+        adb wait-for-device
+        probe_device
+    fi
+    sampler-plot "${args[@]:0:$#-2}" --signal cpu_freq_max expr "$max_freq" --signal cores expr "$n_cores" -c "$cfg_file" --rd-sampler "$sampler_file"
+}
+
+# To generate ini file we need: N core, max cpu freq
+start() {
+    local usage_str="usage: [-r RATE] CFG-FILE"
+    local rate=50  # default rate 100Hz
+    while test $# -gt 0
+    do
+        option=$1
+        case "$option" in
+            -r)
+                if test $# -gt 1; then
+                    rate=$2
+                else
+                    echo "ERROR: missing mandatory parameter to '-r' parameter."
+                    exit 1
+                fi
+                shift ;;
+            *)
+                break ;;
+        esac
+        shift
+    done
+    if test $# -lt 1; then
+        echo $usage_str
+        exit 1
+    fi
+
+    echo "Waiting for adb devices..."
+    local cfg_file="$1"
+    local cfg_file=$(find_cfg_file "$cfg_file")
+    echo "cfg_file=$cfg_file"
+    if [ ! -f "$cfg_file" ]; then
+        echo "Can't find \"$cfg_file\""
+        echo $usage_str
+        exit 1
+    fi
+    echo "Using sampling rate $rate Hz"
+    local sampler_period=$(( (1000000/$rate) ))
+    adb wait-for-device
+    probe_device
+    # we should save probed data somewhere this is just one way of doing it
+    echo "max_freq=$max_freq" > /tmp/sampler_dev_cfg
+    echo "n_cores=$n_cores" >> /tmp/sampler_dev_cfg
+    adb push /tmp/sampler_dev_cfg /data/local/tmp/ &> /dev/null
+
+    # create ini from spc
+    local ini_file=$(sampler-plot -d 1 -c "$cfg_file" --setup|grep -E "\[PUSH-INI\]: /tmp/sampler-config-.*ini -> "|awk -F' -> ' '{print $2}')
+    adb shell mkdir -p /data/local/tmp/out/
+
+    local target_ini_file=/data/local/tmp/$(basename "$ini_file")
+    sed "s|INI_FILE=|INI_FILE=$target_ini_file|" "${SAMPLER_DIR}/start_sampler.sh" > /tmp/start_sampler.sh
+    sed -i "s|PERIOD=|PERIOD=$sampler_period|" /tmp/start_sampler.sh
+    adb push /tmp/start_sampler.sh /data/local/tmp/ &> /dev/null
+    adb shell chmod 755 /data/local/tmp/start_sampler.sh
+    adb shell "/data/local/tmp/start_sampler.sh & sleep 3"
+}
+
+# usage:
+stop() {
+    echo "Waiting for adb devices..."
+    adb wait-for-device
+    for PID in $(pid "/data/local/tmp/sampler"); do 
+        echo "kill $PID"
+        adb shell kill $PID
+    done
+    local sampler_out_file=$(adb shell cat /data/local/tmp/out/sampler_out_filename|tr -d '\r')
+    echo "Extracting $sampler_out_file to $SAMPLER_DIR/$(basename "$sampler_out_file")"
+    adb pull "$sampler_out_file" "$SAMPLER_DIR/" &> /dev/null
+    adb shell rm /data/local/tmp/out/sampler_out_filename
+    adb pull /data/local/tmp/sampler_dev_cfg "$SAMPLER_DIR/$(basename "$sampler_out_file").dev_cfg" &> /dev/null
+}
+
+# usage:
+status() {
+    echo "Waiting for adb devices..."
+    adb wait-for-device
+    probe_device
+    adb shell ps|tr -d '\r'|grep -E "/data/local/tmp/sampler$"
+}
+
+# Check the arguments.
+while test $# -gt 0
+do
+    option=$1
+    shift
+    case "$option" in
+        -h | --help)
+            usage
+            exit 0 ;;
+        -v | --version)
+            echo "$self (${PACKAGE_NAME}) ${PACKAGE_VERSION}"
+            exit 0 ;;
+        -*)
+            echo "Unrecognized option \`$option'" 1>&2
+            usage
+            exit 1 ;;
+        plot-file | plot-live | status | start | stop)
+            $option "$@"
+            exit 0 ;;
+    esac
+done
+
+usage
+exit 0

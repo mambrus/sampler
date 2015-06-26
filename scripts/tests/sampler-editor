@@ -1,0 +1,687 @@
+#!/usr/bin/python
+
+#########################################################################
+#
+# Documentation
+#
+# Drag&drop
+#
+# http://www.pygtk.org/pygtk2tutorial/sec-TreeModelInterface.html
+# http://www.pygtk.org/pygtk2tutorial/sec-TreeViewDragAndDrop.html
+# http://www.pygtk.org/docs/pygtk/class-gdkdragcontext.html
+#
+# List/Tree
+#
+# http://www.pygtk.org/docs/pygtk/class-gtktreestore.html
+# http://www.pygtk.org/docs/pygtk/class-gtktreemodel.html
+# http://www.pygtk.org/docs/pygtk/class-gtkselectiondata.html
+#
+# Widgets
+#
+# http://www.pygtk.org/docs/pygtk/class-gtktreeview.html
+#
+########################################################################
+
+from copy import deepcopy
+import pygtk
+pygtk.require("2.0")
+import glib
+import gtk
+import sys
+import traceback
+import os.path
+
+import sampler_data_adaptors
+import sampler_data_spc
+import sampler_doc
+
+#
+# MenuAdaptor is an object which enables/disabled a menu
+# item based on a given dynamic condition
+#
+class MenuAdaptor:
+    def __init__(self, ui_builder, ui_name, func):
+        self.ui_widget = ui_builder.get_object(ui_name)
+        self.func = func
+    def update(self):
+        #print "yo: MenuAdaptor.update() ui_widget=%r value=%r" % (self.ui_widget, self.func())
+        self.ui_widget.set_sensitive(1 if self.func() else 0)
+
+#
+# GuiLock must be taken when application
+# modifies UI programmatically.
+#
+class GuiLock:
+    def __init__(self, wrapped):
+        self.wrapped = wrapped
+    def __enter__(self):
+        self.wrapped.enter_gui_lock()
+        return self
+    def __exit__(self, type_, value, traceback):
+        return self.wrapped.exit_gui_lock(type_, value, traceback)
+
+#
+# GuiStack handles error messages and status message.  Only status
+# messages from the top-level will be displayed in status area
+#
+class GuiStack:
+    def __init__(self, wrapped):
+        self.wrapped = wrapped
+    def __enter__(self):
+        self.wrapped.enter_gui_stack()
+        return self
+    def __exit__(self, type_, value, traceback):
+        return self.wrapped.exit_gui_stack(type_, value, traceback)
+
+#
+# Helper exception needed for saving fragments of stacktrace,
+# separated by native calls
+#
+class ReraisedException(Exception):
+    pass
+
+#
+# Sampler Editor UI
+#
+class SamplerEditor(object):
+    def __init__(self):
+        self.gui_lock, self.gui_lock_counter = GuiLock(self), 0
+        self.gui_stack, self.gui_stack_counter = GuiStack(self), 0
+        self.saved_exception_stack = []
+        self.data_common = None
+        self.data_signal = None
+        self.src_module = None
+        self.changed_signal = False
+        self.changed_signal_tree = False
+        self.changed_common = False
+        self.changed_model = False
+        #
+        # Build UI
+        #
+        builder = gtk.Builder()
+        bin_file = sys.argv[0]
+        while os.path.islink(bin_file):
+            bin_file = os.path.join(os.path.dirname(bin_file), os.readlink(bin_file))
+        bin_dir = os.path.dirname(bin_file)
+        if bin_dir == None or bin_dir == '':
+            bin_dir = '.'
+        builder.add_from_file("%s/sampler_editor.ui" % bin_dir)
+        self.text_format_setup(builder)
+        widget_names = ["window",
+                        "tree",
+                        "treestore",
+                        "signal_id",
+                        "statusbar_label",
+                        "dialog_open",
+                        "dialog_save",
+                        "dialog_export",
+                        "dialog_overwrite",
+                        "dialog_about",
+                        "dialog_error",
+                        "dialog_close_without_saving",
+                        "filefilter_spc",
+                        "filefilter_ini",
+                        "signal_exportable",
+                        "signal_expectable",
+                        "signal_visible",
+                        ]
+        for name in widget_names:
+            setattr(self, name, builder.get_object(name))
+        for o in builder.get_objects():
+            try:
+                self.text_format(o)
+            except:
+                pass
+        self.drag_and_drop_prefix = "sampler-editor-drag-and-drop: "
+        drag_target = ('text/plain', gtk.TARGET_SAME_WIDGET, 0)
+        self.tree.enable_model_drag_source(gtk.gdk.BUTTON1_MASK,
+                                           [drag_target],
+                                           gtk.gdk.ACTION_DEFAULT | gtk.gdk.ACTION_MOVE | gtk.gdk.ACTION_COPY)
+        self.tree.enable_model_drag_dest([drag_target], gtk.gdk.ACTION_DEFAULT | gtk.gdk.ACTION_MOVE)
+        # @todo new fields
+        # export to ini
+        # expect from sampler
+        # display
+        self.adaptor_signal = sampler_data_spc.build_adaptor_signal(self, builder)
+        self.adaptor_common = sampler_data_spc.build_adaptor_common(self, builder)
+        self.adaptor_none = sampler_data_adaptors.StructAdaptor(
+            [],
+            ui_controller = self,
+            ui_builder = builder,
+            ui_placeholder_name='item_editor')
+        self.adaptors_menu = [
+            MenuAdaptor(builder, "menu_file_new",     lambda : True),
+            MenuAdaptor(builder, "menu_file_open",    lambda : True),
+            MenuAdaptor(builder, "menu_file_save",    lambda : self.data_common),
+            MenuAdaptor(builder, "menu_file_save_as", lambda : self.data_common),
+            MenuAdaptor(builder, "menu_file_export",  lambda : self.data_common),
+            MenuAdaptor(builder, "menu_file_close",   lambda : self.data_common),
+            MenuAdaptor(builder, "menu_file_quit",    lambda : True),
+            MenuAdaptor(builder, "menu_signal_add",     lambda : self.data_common),
+            MenuAdaptor(builder, "menu_signal_delete",  lambda : self.data_signal),
+            ]
+        self.RESPONSE_SAVE = 1
+        self.filefilter_spc.add_pattern("*.spc")
+        self.filefilter_ini.add_pattern("*.ini")
+        builder.connect_signals(self)
+        #
+        # Load .spc file provided by command line
+        #
+        data_common, src_module, filename = None, None, None
+        if len(sys.argv) == 2:
+            try:
+                data_common, src_module = sampler_data_spc.load(self.adaptor_common, self.adaptor_signal, sys.argv[1])
+            except:
+                print >>sys.stderr, "*** error parsing config file %s" % filename
+                print >>sys.stderr, traceback.format_exc()
+                sys.exit(1)
+            if data_common:
+                filename = sys.argv[1]
+        #
+        # Show window and setup model
+        #
+        self.set_model(data_common, src_module, filename)
+        self.window.show()
+        sys.excepthook = self.excepthook
+    def enter_gui_lock(self):
+        self.gui_lock_counter += 1
+    def exit_gui_lock(self, type_, value, traceback):
+        self.gui_lock_counter -= 1
+    def enter_gui_stack(self):
+        self.check()
+        self.gui_stack_counter += 1
+        if self.gui_stack_counter == 1:
+            self.statusbar_label.set_text('')
+    def exit_gui_stack(self, type_, value, tb):
+        self.gui_stack_counter -= 1
+        self.check()
+        return False
+    def check(self):
+        if len(self.saved_exception_stack) > 0:
+            raise ReraisedException()
+    def excepthook(self, type_, value, tb):
+        try:
+            title = "".join(traceback.format_exception_only(type_, value))
+            stack = "".join(traceback.format_exception(type_, value, tb))
+            # save exception data to be printed later when we are back to top level
+            self.saved_exception_stack.insert(0, (title, stack))
+            if self.gui_stack_counter == 0:
+                # print exception only when we are back to top level
+                title = self.saved_exception_stack[-1][0]
+                stack = "----------------------------------------\n".join(["".join(substack) for _, substack in self.saved_exception_stack])
+                self.saved_exception_stack = []
+                print >>sys.stderr, title
+                print >>sys.stderr, stack
+                self.statusbar_label.set_text('')
+                self.dialog_error.set_markup(glib.markup_escape_text(title))
+                self.dialog_error.format_secondary_text(stack)
+                self.run_and_hide(self.dialog_error)
+        except Exception, e:
+            print >>sys.stderr, "*** error showing error"
+            print >>sys.stderr, traceback.format_exc()
+    def status(self, text):
+        if self.gui_stack_counter == 1:
+            self.statusbar_label.set_text(text)
+    def run_and_hide(self, dialog, response=gtk.RESPONSE_CANCEL):
+        try:
+            response = dialog.run()
+        finally:
+            dialog.hide()
+        return response
+    def text_format_setup(self, builder):
+        #
+        # Text formatting allows the use of "%(key)s" format specifiers in glade UI description.
+        # "accessors" below define how to get/set properties which can be customized on run-time.
+        #
+        self.text_format_data = {}
+        self.text_replacements = {'year': 2013, 'version': '0.1'}
+        self.text_replacements.update(sampler_doc.get_documentation())
+        accessors = {
+            gtk.Label:
+                [("text",           lambda w: w.get_text(),      lambda w, t: w.set_text(t)),
+                 ("prop_markup",    lambda w: w.props.tooltip_markup, lambda w, t: w.set_property(gtk.Label.props.tooltip_markup.name, t))],
+            gtk.MessageDialog:
+                [("prop_text",      lambda w: w.props.text,      lambda w, t: w.set_property(gtk.MessageDialog.props.text.name, t))],
+            gtk.AboutDialog:
+                [("prop_version",   lambda w: w.props.version,   lambda w, t: w.set_property(gtk.AboutDialog.props.version.name, t)),
+                 ("prop_copyright", lambda w: w.props.copyright, lambda w, t: w.set_property(gtk.AboutDialog.props.copyright.name, t)),
+                 ("prop_license",   lambda w: w.props.license,   lambda w, t: w.set_property(gtk.AboutDialog.props.license.name, t))]
+            }
+        for o in builder.get_objects():
+            t = type(o)
+            if accessors.has_key(t):
+                self.text_format_data[o] = [(name, getter(o), setter) for name, getter, setter in accessors[t]]
+                #print "yo: SamplerEditor(): %r %r" % (o, self.text_format_data[o])
+    def text_format(self, widget, **kwargs):
+        #
+        # Use "self.text_replacements" and "kwargs" dictionaries to
+        # format strings in "widget"
+        #
+        d = dict(self.text_replacements, **kwargs)
+        if self.text_format_data.has_key(widget):
+            for name, format, setter in self.text_format_data[widget]:
+                #print "yo: text_format(): %r %r -> %r" % (widget, format, format % d)
+                setter(widget, format % d)
+    def update(self):
+        #
+        # Update menu by enabling/disabling menu items
+        #
+        for a in self.adaptors_menu:
+            a.update()
+    def mark_changed_signal(self):
+        #
+        # Callback notifying that some of the signal fields has
+        # changed by the user
+        #
+        with self.gui_stack:
+            #print "yo: changed_signal()"
+            if self.gui_lock_counter == 0:
+                #print "yo: changed_signal() -> true"
+                self.changed_signal = True
+    def mark_changed_signal_title(self):
+        #
+        # Callback notifying that "signal title" has changed by the
+        # user
+        #
+        with self.gui_stack:
+            #print "yo: changed_signal_title()"
+            self.mark_changed_signal()
+            model, i = self.tree.get_selection().get_selected()
+            if i:
+                row = self.treestore.get_path(i)
+                model[row][1] = self.signal_id.get_text()
+    def mark_changed_signal_and_update_sensitivity(self):
+        #
+        # Callback notifying signal changed and sensitivity on some
+        # fields must bu updated
+        #
+        with self.gui_stack:
+            #print "yo: changed_signal_title()"
+            self.mark_changed_signal()
+            if self.gui_lock_counter == 0:
+                self.adaptor_signal.ui_set_sensitivity(self.data_signal)
+    def mark_changed_signal_tree(self):
+        #
+        # Callback notifying that some of the signal tree fields has
+        # changed by the user. This includes
+        # adding/deleting/reordering items.
+        #
+        with self.gui_stack:
+            #print "yo: changed_signal_tree()"
+            if self.gui_lock_counter == 0:
+                #print "yo: changed_signal_tree() -> true"
+                self.changed_signal_tree = True
+    def mark_changed_common(self):
+        #
+        # Callback notifying that some of the common fields has
+        # changed by the user
+        #
+        with self.gui_stack:
+            #print "yo: changed_common()"
+            if self.gui_lock_counter == 0:
+                #print "yo: changed_common() -> true"
+                self.changed_common = True
+    def is_signal_exportable(self, model):
+        with self.gui_stack:
+            self.sync_model()
+            return sampler_data_spc.is_signal_exportable(model)
+    def is_signal_expectable(self, model):
+        with self.gui_stack:
+            self.sync_model()
+            return model['expectable']
+    def is_signal_visible(self, model):
+        with self.gui_stack:
+            self.sync_model()
+            return model['visible']
+    def is_model_modified(self):
+        #
+        # Synchronizes model and UI
+        # returns True if model has changed
+        #
+        self.sync_model()
+        return self.changed_model
+    def sync_model(self):
+        #
+        # Check if user has modified data via UI and copy his changes
+        # to "self.data_common" and "self.data_signal"
+        #
+        # @todo handle errors, return False, handle return code
+        if self.changed_signal:
+            self.adaptor_signal.ui_modify_model(self.data_signal)
+            self.changed_signal, self.changed_model = False, True
+        if self.changed_signal_tree:
+            def f(rows, signals, subsignal=0, prefix=""):
+                if rows:
+                    for row in rows:
+                        if row[0]:
+                            row[0]['subsignal'] = subsignal
+                            signals.append(row[0])
+                            #print "yo: sync_model(): %s %s" % (prefix, row[0]['id'])
+                            f(row.iterchildren(), signals, subsignal + 1, prefix + "  ")
+            #print "yo: sync_model(): -----"
+            signals = []
+            f(self.treestore, signals)
+            self.data_common['signals'] = signals
+            #print "yo: sync_model(): -----"
+            self.changed_signal_tree, self.changed_model = False, True
+        if self.changed_common:
+            self.adaptor_common.ui_modify_model(self.data_common)
+            self.changed_common, self.changed_model = False, True
+    def on_window_delete(self, widget, data=None):
+        #
+        # On menu item File->Quit
+        #
+        with self.gui_stack:
+            if self.is_model_modified():
+                self.text_format(self.dialog_close_without_saving, filename=(self.filename if self.filename else "(unnamed)"))
+                response = self.run_and_hide(self.dialog_close_without_saving)
+                # possible responses are: gtk.RESPONSE_YES | gtk.RESPONSE_CANCEL | self.RESPONSE_SAVE
+                if response == gtk.RESPONSE_YES:
+                    self.status("Quitting without saving")
+                    gtk.main_quit()
+                elif response == self.RESPONSE_SAVE:
+                    if self.on_menu_file_save(self.window):
+                        self.status("Quitting after saving")
+                        gtk.main_quit()
+                else:
+                    self.status("Cancelled")
+            else:
+                self.status("Quitting")
+                gtk.main_quit()
+        return True
+    def on_menu_file_new(self, widget):
+        #
+        # On menu item File->New
+        #
+        with self.gui_stack:
+            if self.on_menu_file_close(None):
+                data_common_raw = {'signals': [],
+                                   'extra_feedgnuplot': '--ylabel="Y" --y2label="Y2" --ymin 0 --ymax 100 --y2min 0 --y2max 100',
+                                   'period': 10000,
+                                   'sigs_file': '/system/etc/sampler/NONAME01.ini'}
+                data_common = {}
+                self.adaptor_common.load(data_common_raw, data_common)
+                self.set_model(data_common, None, None)
+                self.status("Created new configuration")
+            else:
+                self.status("Cancelled")
+    def on_menu_file_open(self, widget):
+        #
+        # On menu item File->Open
+        #
+        with self.gui_stack:
+            if self.on_menu_file_close(None):
+                response = self.run_and_hide(self.dialog_open)
+                if response == gtk.RESPONSE_OK:
+                    filename = self.dialog_open.get_filename()
+                    data_common, src_module = sampler_data_spc.load(self.adaptor_common, self.adaptor_signal, filename)
+                    self.set_model(data_common, src_module, filename)
+                    self.status("Opened %s" % self.dialog_open.get_filename())
+                else:
+                    self.status("Cancelled")
+            else:
+                self.status("Cancelled")
+    def on_menu_file_save(self, widget, filename=None):
+        #
+        # On menu item File->Save
+        #
+        with self.gui_stack:
+            if not filename:
+                filename = self.filename
+            if not filename:
+                # this is when saving a new document
+                result = self.on_menu_file_save_as(widget)
+                if result:
+                    self.status("Saved %s" % self.filename)
+                else:
+                    self.status("Cancelled")
+                return result
+            else:
+                self.sync_model()
+                sampler_data_spc.save(self.adaptor_common, self.adaptor_signal, filename, self.data_common, self.src_module)
+                # if we reach this point then file is successfully saved
+                self.changed_model = False
+                self.filename = filename
+                self.status("Saved %s" % self.filename)
+                return True
+            return False
+    def on_menu_file_save_as(self, widget):
+        #
+        # On menu item File->Save As
+        #
+        with self.gui_stack:
+            filename = None
+            response = self.run_and_hide(self.dialog_save)
+            if response == gtk.RESPONSE_OK:
+                filename = self.dialog_save.get_filename()
+            if filename and os.path.exists(filename):
+                self.text_format(self.dialog_overwrite, filename=filename)
+                response = self.run_and_hide(self.dialog_overwrite)
+                if response != gtk.RESPONSE_YES:
+                    filename = None
+            if filename:
+                result = self.on_menu_file_save(widget, filename=filename)
+                if result:
+                    self.status("Saved %s" % self.filename)
+                else:
+                    self.status("Cancelled")
+                return result
+            else:
+                self.status("Cancelled")
+                return False
+    def on_menu_file_export(self, widget):
+        #
+        # On menu item File->Export
+        #
+        with self.gui_stack:
+            self.sync_model()
+            filename = None
+            response = self.run_and_hide(self.dialog_export)
+            if response == gtk.RESPONSE_OK:
+                filename = self.dialog_export.get_filename()
+            else:
+                self.status("Export cancelled")
+            if filename and os.path.exists(filename):
+                self.text_format(self.dialog_overwrite, filename=filename)
+                response = self.run_and_hide(self.dialog_overwrite)
+                if response != gtk.RESPONSE_YES:
+                    filename = None
+                    self.status("Export cancelled")
+            if filename:
+                sampler_data_spc.export(self.adaptor_common, self.adaptor_signal, filename, self.data_common)
+                self.status("Exported to %s" % filename)
+    def on_menu_file_close(self, widget):
+        #
+        # On menu item File->Close
+        #
+        with self.gui_stack:
+            if self.is_model_modified():
+                self.text_format(self.dialog_close_without_saving, filename=(self.filename if self.filename else "(unnamed)"))
+                response = self.run_and_hide(self.dialog_close_without_saving)
+                # possible responses are: gtk.RESPONSE_YES | gtk.RESPONSE_CANCEL | self.RESPONSE_SAVE
+                if response == gtk.RESPONSE_YES:
+                    self.set_model(None, None, None)
+                    self.status("Closed without saving")
+                    return True
+                elif response == self.RESPONSE_SAVE and self.on_menu_file_save(self.window):
+                    self.set_model(None, None, None)
+                    self.status("Saved and closed")
+                    return True
+                else:
+                    self.status("Cancelled")
+                    return False
+            else:
+                self.set_model(None, None, None)
+                self.status("Closed")
+                return True
+    def on_menu_signal_add(self, widget):
+        #
+        # On menu item Signal->Add
+        #
+        with self.gui_stack:
+            #print "yo: on_menu_signal_add() widget=%r" % widget
+            self.sync_model()
+            signal_raw = {'id': 'NEW_ID',
+                          'nuce': 3,
+                          'scale': 'lambda x: x',
+                          'nosig': 'NO_SIG'}
+            signal = {}
+            self.adaptor_signal.load(signal_raw, signal)
+            i = self.treestore.append(None, [signal, signal['id']])
+            self.tree.get_selection().select_iter(i)
+            self.on_tree_cursor_changed(self.tree)
+            self.mark_changed_signal_tree()
+            self.status("Added signal %s" % signal['id'])
+    def on_menu_signal_delete(self, widget):
+        #
+        # On menu item Signal->Delete
+        #
+        with self.gui_stack:
+            #print "yo: on_menu_signal_delete() widget=%r" % widget
+            self.mark_changed_signal_tree()
+            model, i = self.tree.get_selection().get_selected()
+            row = self.treestore.get_path(i)
+            signal = model[row][0]
+            self.treestore.remove(i)
+            self.adaptor_none.ui_set_model(None)
+            self.status("Removed signal %s" % signal['id'])
+    def on_menu_help_about(self, widget):
+        #
+        # On menu item Help->About
+        #
+        with self.gui_stack:
+            self.text_format(self.dialog_about)
+            self.run_and_hide(self.dialog_about)
+    def on_tree_cursor_changed(self, widget):
+        #
+        # Callback notifying that user selected some other signal in
+        # the signal tree
+        #
+        #print "yo: on_tree_cursor_changed(): %r" % widget
+        with self.gui_stack:
+            with self.gui_lock:
+                self.sync_model()
+                model, i = self.tree.get_selection().get_selected()
+                if i:
+                    row = self.treestore.get_path(i)
+                    self.data_signal = model[row][0]
+                    if self.data_signal:
+                        self.adaptor_signal.ui_set_model(self.data_signal)
+                    else:
+                        self.adaptor_common.ui_set_model(self.data_common)
+                else:
+                    self.data_signal = None
+                    self.adaptor_none.ui_set_model(None)
+                self.update()
+    def on_tree_drag_data_get(self, widget, context, selection, info, timestamp):
+        with self.gui_stack:
+            model, i = self.tree.get_selection().get_selected()
+            row = self.treestore.get_path(i)
+            print "yo: on_tree_drag_data_get() row = %r" % (row,)
+            text = "%s%r" % (self.drag_and_drop_prefix, row)
+            selection.set('text/plain', 8, text)
+    def treestore_children_get_rec(self, rows):
+        return [(list(row)[:], self.treestore_children_get_rec(row.iterchildren())) for row in rows] if rows else []
+    def treestore_children_append_rec(self, row, children, copy):
+        for (data, grandchildren) in children:
+            child_row = self.treestore.append(row, copy(data))
+            self.treestore_children_append_rec(child_row, grandchildren, copy)
+    def seq_startswith(self, seq1, seq2):
+        return seq1 and seq1[:len(seq2)] == seq2 if seq2 else True
+    def on_tree_drag_data_received(self, widget, context, x, y, selection, info, timestamp):
+        with self.gui_stack:
+            text = selection.data
+            src_path = eval(text[len(self.drag_and_drop_prefix):]) if text.startswith(self.drag_and_drop_prefix) else None
+            if not src_path:
+                return
+            data = self.treestore[src_path]
+            if not data[0]:
+                return
+            copy = (lambda x: x) if context.action == gtk.gdk.ACTION_MOVE else (lambda x: deepcopy(list(x)))
+            dropped = False
+            src_children = self.treestore_children_get_rec(self.treestore[self.treestore.get_iter(src_path)].iterchildren())
+            drop_info = self.tree.get_dest_row_at_pos(x, y)
+            if drop_info:
+                dst_path, position = drop_info
+                dst_iter = dst_path and self.treestore.get_iter(dst_path) or None
+                dst_parent_path = dst_path and len(dst_path) > 1 and dst_path[:-1] or None
+                dst_parent_iter = dst_parent_path and self.treestore.get_iter(dst_parent_path) or None
+                #print "yo: on_tree_drag_data_received() %r -> %r (under %r), position=%r" % (src_path, dst_path, dst_parent_path, position)
+                if len(src_children) > 0:
+                    pass
+                    #print "yo: on_tree_drag_data_received() src has children"
+                elif len(dst_path) > 1:
+                    pass
+                    #print "yo: on_tree_drag_data_received() dst is too deep"
+                elif self.seq_startswith(dst_path, src_path):
+                    pass
+                    #print "yo: on_tree_drag_data_received() drop to child"
+                else:
+                    if position == gtk.TREE_VIEW_DROP_BEFORE:
+                        dropped = self.treestore.insert_before(dst_parent_iter, dst_iter, copy(data))
+                    elif position == gtk.TREE_VIEW_DROP_AFTER:
+                        dropped = self.treestore.insert_after(dst_parent_iter, dst_iter, copy(data))
+                    elif position == gtk.TREE_VIEW_DROP_INTO_OR_BEFORE or position == gtk.TREE_VIEW_DROP_INTO_OR_AFTER:
+                        dropped = self.treestore.append(dst_iter, copy(data))
+            else:
+                #print "yo: on_tree_drag_data_received() %r -> append" % (src_path,)
+                dropped = self.treestore.append(None, copy(data))
+            if dropped:
+                self.treestore_children_append_rec(dropped, src_children, copy)
+            if dropped and context.action == gtk.gdk.ACTION_MOVE:
+                context.finish(True, True, timestamp)
+            if dropped:
+                self.mark_changed_signal_tree()
+    def on_treestore_row_inserted(self, *args, **kwargs):
+        #
+        # Callback notifying that user reorders items in the signal
+        # tree (insertion is part of drag&drop reordering)
+        #
+        with self.gui_stack:
+            #print "yo: on_tree_row_inserted() args=%r kwargs=%r" % (args, kwargs)
+            self.mark_changed_signal_tree()
+            self.on_tree_cursor_changed(self.tree)
+        return True
+    def on_treestore_row_deleted(self, *args, **kwargs):
+        #
+        # Callback notifying that user reorders items in the signal
+        # tree (deletion is part of drag&drop reordering)
+        #
+        with self.gui_stack:
+            #print "yo: on_tree_row_deleted() args=%r kwargs=%r" % (args, kwargs)
+            self.mark_changed_signal_tree()
+            self.on_tree_cursor_changed(self.tree)
+        return True
+    def set_model(self, data_common, src_module, filename):
+        #
+        # Sets the model object and it's associated filename and
+        # updates the whole UI
+        #
+        with self.gui_lock:
+            if self.is_model_modified():
+                print >>sys.stderr, "set_model(): discarding unsaved changes"
+            self.data_common = data_common
+            self.src_module = src_module
+            self.filename = filename
+            self.treestore.clear()
+            self.adaptor_none.ui_set_model(None)
+            if self.data_common:
+                self.treestore.append(None, [None, "- common -"])
+                if self.data_common.has_key('signals'):
+                    path = []
+                    for signal in self.data_common['signals']:
+                        depth = signal['subsignal'] if signal.has_key('subsignal') else 0
+                        if depth == True: depth = 1 # backward compatibility with older versions
+                        del path[depth:] # reduce path to keep relevant parents
+                        new_row = self.treestore.append(path[-1] if len(path) > 0 else None, [signal, signal['id']])
+                        path.append(new_row)
+            self.changed_signal, self.changed_signal_tree, self.changed_common = False, False, False
+            self.changed_model = False
+            self.update()
+
+#
+# SamplerEditor entry point
+#
+if __name__ == "__main__":
+    app = SamplerEditor()
+    gtk.main()

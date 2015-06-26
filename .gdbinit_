@@ -1,0 +1,37 @@
+# Adapted for NDK-builds, tweaked to fit kgdb
+#
+# If symbols for libc is needed, these are expected to reside in a link
+# called "mysyms "
+# Create mysyms link in source dir like this (note: you need a recent build)
+# ln -sf $(pwd)/out/target/product/${BUILD_RTARGET}/symbols mysyms )
+
+#set solib-absolute-prefix ./mysyms/system
+#set solib-search-path ./mysyms/system/lib:\
+#./mysyms/system/bin:\
+#./mysyms/system/lib/bluez-plugin:\
+#./mysyms/system/lib/libsystemconnector:\
+#./mysyms/system/lib/egl:\
+#./mysyms/system/lib/hw:\
+#./mysyms/system/lib/soundfx:\
+#./mysyms/system/vendor/lib/hw:\
+#./obj/local/armeabi/
+
+dir libsampler:libmlist:libmqueue
+#add-auto-load safe-path #Some_python_directory:
+
+set solib-search-path ./obj/local/armeabi/
+
+#Substitute example
+#set substitute-path /from/somewhere /to/somewhere/else
+
+#Set a directory path to your sources here if not debugging from your source root:
+#directory /home/CORPUSERS/23xxyyzz/yourandroidpath
+
+#set auto-solib-add
+#set symbol-reloading on
+
+set print symbol-filename on
+
+info threads
+info shared
+

@@ -2,7 +2,10 @@ sampler
 files.s3
 tags
 *.o
+*.d
+*.tmp
 *.a
 *.so
 *.swp
 *.*~
+*.pyc

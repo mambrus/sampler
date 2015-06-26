@@ -1,0 +1,47 @@
+First make sure adb is working and we have connection with device:
+
+$ adb devices
+
+
+Start sampler-plot in live mode:
+
+$ sam plot-live base_util.spc
+
+
+Check device for running sampler processes:
+
+$ sam status
+
+
+Start sampler (default rate is 50Hz) on device in background, its ok to detach usb cable:
+
+$ sam start base_util.spc
+
+
+Stop running sampler and extract sampler log:
+
+$ sam stop
+
+It's also possible to set rate, start sampler on device in background
+with sampling rate 100Hz, its ok to detach usb cable:
+
+$ sam start -r 100 base_util.spc
+
+
+Start sampler-plot in file mode, gnuplot view:
+
+$ sam plot-file base_util.spc ~/sampler/sampler_20140924_114124
+
+
+Start sampler-plot in file mode, csv output:
+
+$ sam plot-file --csv a.csv base_util.spc ~/sampler/sampler_20140924_114124
+
+
+Edit spc file:
+
+$ sampler-editor ~/sampler/base_util.spc
+
+
+References:
+[1] https://wiki.sonyericsson.net/mib/Sampler_Editor

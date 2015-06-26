@@ -18,16 +18,16 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef local_h
-#define local_h
-
-#define LDATA struct listheader
+#ifndef libmlist_local_h
+#define libmlist_local_h
 #include <mlist.h>
 
 #define __init __attribute__((constructor))
 #define __fini __attribute__((destructor))
 
 #define TBD_UNFINISHED "Code not finished!!! (TBD)"
+
+int dstrct_mlist(const handle_t handle);
 
 /* Administrative keeper of all lists */
 struct mlistmod_struct {
@@ -41,6 +41,7 @@ struct mlistmod_struct {
 /* Indicate to others that someone is keeping this as global module data
  * (easier to find with GDB) */
 extern struct mlistmod_struct mlistmod_data;
+extern struct mlistmod_settings mlistmod_settings;
 
 /* Data of this struct is the payload for the mlist variable in mlistmod_struct.
  * It's the administrative keeper of each list. */
@@ -49,6 +50,10 @@ struct listheader {
 	off_t o;              /* Offset from start (in jumps jumps) */
 	int nelem;            /* Current size of this list */
 	int pl_sz;            /* pay-load size */
+	struct listheader *owner; /* If this is a dup, will point to the
+						     original*/
+	int nr_links;         /* if duped, will be larger than 0, note dups can
+							 be duped*/
 
 	/* Caller provided function used to search & sort list. Can be NULL if
 	 * search and sort is not supported */
@@ -57,5 +62,5 @@ struct listheader {
 	struct node *ptail;   /* List-end */
 };
 
-#endif /* local_h */
+#endif /* libmlist_local_h */
 

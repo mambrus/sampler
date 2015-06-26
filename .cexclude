@@ -1,5 +1,6 @@
 *.git/*
 out/*
+mysyms/*
 dalvik/dx/tests/*
 temp_*
 #Consider all these but one to be excluded if tagging in linux kernel
@@ -27,4 +28,3 @@ arch/sparc/*
 arch/um/*
 arch/x86/*
 arch/xtensa/*
-

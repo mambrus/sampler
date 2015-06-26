@@ -1,0 +1,40 @@
+#Source this to build/debug for native builds/runs
+#Source from main project directory
+export SAMPLER_ENV_SET='y'
+export PNAME=sampler
+
+THIS_DIR=$(basename $(pwd))
+if [ "X${THIS_DIR}" == "X${PNAME}" ]; then
+	source .env_common
+
+	export SAMPLER_ENV_SET='y'
+	export LIB_DYNAMIC='y'
+	unset LIB_DYNAMIC
+
+	##-- Shared library handling (if needed)
+	# TBD. For now, requires installation on target locaton
+
+	##-- Debugger environment setup
+	export KDBG_SESSION="-r localhost:5039"
+	export KDBG_BINARY="obj/local/armeabi/sampler"
+	export TCP_TAP_CMD="gdb_arm"
+	#export TCP_TAP_CMD="arm-eabi-gdb"
+	#export TCP_TAP_CMD="arm-linux-androideabi-gdb"
+	if ! [ -a .gdbinit ]; then
+		ln -s .gdbinit_ .gdbinit
+	fi
+
+	##-- Path to executables
+	echo "SAMPLER - Cross environment set-up"
+	echo "Using local paths..."
+	set_path_ifneeded ./sampler
+	set_path_ifneeded ./bin/push_sampler.sh
+	set_path_ifneeded ./scripts/tests/sampler-plot
+else
+	echo "ERROR: Not sourcing from source root. BAD-BOI!" 1>&2
+	echo "  THIS_DIR: ${THIS_DIR}" 1>&2
+	echo "  PNAME: ${PNAME}" 1>&2
+	echo "  Refused to source. Have a nice day :-)" 1>&2
+fi
+
+unset THIS_DIR

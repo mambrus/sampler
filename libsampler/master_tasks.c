@@ -27,142 +27,48 @@
 #include <sys/times.h>
 #include <stdint.h>
 #include <string.h>
+#include <mqueue.h>
+#include <errno.h>
 
 /* Include module common stuff */
 #include "sampler.h"
 #include "sigstruct.h"
 #include "local.h"
 
-static char *get_signame(const char *fname, char *buf, int *ret_len) {
-	FILE *f;
-
-	f = fopen(fname, "r");
-	assert_ext(f);
-	if (!f){
-		if (ret_len)
-			*ret_len = 0;
-		return NULL;
-	}
-	memset(buf, 0, NAME_STR_MAX);
-	fgets(buf, NAME_STR_MAX, f);
-	fclose(f);
-
-	/* fgets should have done this already, but just to be
-	 * safe: */
-	buf[NAME_STR_MAX-1]='\0';
-
-	/* Get rid of last LF is such exists */
-	if (buf[strlen(buf) -1] == '\n')
-		buf[strlen(buf) -1] = '\0';
-
-	if (ret_len)
-		*ret_len = strlen(buf);
-
-	if (strlen(buf)) {
-		return buf;
-	}
-	return NULL;
-}
-
-/* Output first line describing the contents of each columns. These strings
- * will be be used as legends in plotting software */
-void outputlegends( void ) {
-	int j,from_file=0;
-	struct node *np;
-	struct sig_sub *sig_sub;
-	struct sig_data *sig_data;
-	struct sig_def *sig_def;
-	struct smpl_signal *smpl_signal;
-	char *tname;
-	char tname_buff[NAME_STR_MAX];
-
-	/* All modglobals are finalized by now. It's safe to use them */
-	handle_t list = samplermod_data.list;
-
-	if (samplermod_data.dolegend) {
-		printf("Time-now%cTSince-last",
-				samplermod_data.delimiter);
-
-		for(np=mlist_head(list); np; np=mlist_next(list)){
-			assert(np->pl);
-
-			smpl_signal=(struct smpl_signal *)(np->pl);
-			sig_data=&((*smpl_signal).sig_data);
-			sig_def=&((*smpl_signal).sig_def);
-
-			if (sig_def->fname && strnlen(sig_def->fname, NAME_STR_MAX)) {
-				from_file = 1;
-				tname =sig_def->fname;
-			} else {
-				from_file = 0;
-				tname =sig_def->name;
-			}
-
-			assert_ext(tname && strnlen(tname, NAME_STR_MAX) &&
-				("Symbolic name and file where to get it from can't both be nil" !=
-				 NULL)
-			);
-
-			if (sig_data->nsigs > 1) {
-				for(j=0; j<sig_data->nsigs; j++){
-					sig_sub=&((sig_data->sigs)[j]);
-				}
-			} else {
-				if (from_file) {
-					printf("%c%s",
-						samplermod_data.delimiter,
-						get_signame(
-							tname,tname_buff, NULL)
-					);
-				} else {
-					printf("%c%s",
-						samplermod_data.delimiter,
-						tname
-					);
-				}
-			}
-		}
-
-		printf("\n");
-		fflush(stdout);
-	}
-}
+/* Simple sanity-check, covers the most common case: the empty-string */
+#define HAS_VALID_DATA (val != NULL && (val[0]>='-' && val[0]<='z'))
 
 /* Output in format according to settings */
-void output(int cid, const char *val, int always ) {
-	int wa = 0;
-	static const char *fakeval = "0";
+static void output(int cid, const char *val, enum nuce forceprint ) {
+	static const char *fakeval = "0xCACACAFE";
 	const char *v = val;
-	volatile static int face_cntr = 0;
-	volatile static int wut_cntr = 0;
+	static volatile int face_cntr = 0;
+	static volatile int wut_cntr = 0;
 
 	face_cntr++;
 	wut_cntr++;
-	if ( always && !(val[0]>='-' && val[0]<='z') ){
-		if (always != 1) {
+	if ( !HAS_VALID_DATA && forceprint ){
+		if (forceprint == NOTHING) {
 			fprintf(stderr, "ERROR: must print but have nothing"
 				" to fall-back on. Faking it... %d:%d\n",face_cntr,cid);
 		/* This is a clear error indication of the framework, but don't
 		 * assert for now as it else makes it even harder to see and debug
 		 * with feedgnuplot */
+			v = fakeval;
 		} else {
-			fprintf(stderr, "ERROR: Wut had you been smoking when you wrote "
-				"["__FILE__"] !!!? [%d:%d]\n",wut_cntr,cid);
-		/* Impossible combo */
+			INFO(("WARNING: Output-value is faked [%d]\n",forceprint));
 		}
-		wa = 1;
-		v = fakeval;
 	}
-	switch (samplermod_data.plotmode) {
+	switch (sampler_setting.plotmode) {
 		case driveGnuPlot:
-			fputc('0'+cid+samplermod_data.cid_offs,stdout);
+			fputc('0'+cid+sampler_data.cid_offs,stdout);
 			fputc(':',stdout);
 			fputs(v,stdout);
 			fputc('\n',stdout);
 			break;
 		case feedgnuplot:
 		default:
-			fputc(samplermod_data.delimiter,stdout);
+			fputc(sampler_setting.delimiter,stdout);
 			fputs(v,stdout);
 	}
 }
@@ -173,17 +79,22 @@ void output(int cid, const char *val, int always ) {
  * outputting nothing and to also get a corresponding break in the
  * continuity of the plot) */
 static void ondataempty(int cid, const struct sig_sub* sig_sub) {
-	switch (samplermod_data.whatTodo) {
-		case Lastval:
-			output(cid, sig_sub->val ,1);
+	switch (sig_sub->ownr->ownr->sig_def.nuce) {
+		case LASTVAL:
+			if (!sig_sub->isstr) {
+				output(cid, sig_sub->val, LASTVAL);
+			} else {
+				assert_ext("A value of type string can't repeat previous values"
+					== NULL);
+			}
 			break;
-		case PresetSigStr:
-			output(cid, sig_sub->presetval, 1);
+		case PRESET_SIG:
+			output(cid, sig_sub->presetval, PRESET_SIG);
 			break;
-		case PresetSmplStr:
-			output(cid, samplermod_data.presetval ,1);
+		case PRESET_SMPL:
+			output(cid, sampler_setting.presetval, PRESET_SMPL);
 			break;
-		case Nothing:
+		case NOTHING:
 		default:
 			output(cid, "", 0);
 	}
@@ -197,88 +108,224 @@ static void collect_and_print(const handle_t list){
 	struct smpl_signal *smpl_signal;
 
 	for(np=mlist_head(list); np; np=mlist_next(list)){
-		assert(np->pl);
+		assert_ext(np->pl);
 
 		smpl_signal=(struct smpl_signal *)(np->pl);
 		sig_data=&((*smpl_signal).sig_data);
 		for(j=0; j<sig_data->nsigs; j++){
-			sig_sub=&((sig_data->sigs)[j]);
-			sig_sub->val[VAL_STR_MAX-1] = '\0';
-			if (sig_sub->is_updated) {
-				output(j, sig_sub->val, 2);
+			sig_sub=&((sig_data->sig_sub)[j]);
+			if (sig_sub->daq_type == FREERUN_ASYNCHRONOUS)
+				pthread_mutex_lock(&sig_sub->lock);
+			if (sig_sub->val_pipe) {
+				struct val_msg val_msg;
+				int rc;
+				unsigned prio;
+
+				rc=mq_receive(sig_sub->val_pipe->read,
+					(char*)&val_msg,
+					sizeof(struct val_msg), &prio);
+
+				if ((rc==(mqd_t)-1) && (errno==EAGAIN)) {
+					ondataempty(j,sig_sub);
+				} else if (rc==(mqd_t)-1) {
+					fprintf(stderr,"errno=%d\n",errno);
+					fflush(stderr);
+					perror(strerror(errno));
+					assert_ext("This is bad!" == NULL);
+				} else {
+					if (sig_sub->isstr) {
+						output(j, val_msg.valS, NOTHING);
+						free(val_msg.valS);
+					} else {
+						output(j, val_msg.valS, NOTHING);
+						free(val_msg.valS);
+					}
+				}
 			} else {
-				ondataempty(j,sig_sub);
+				if (sig_sub->is_updated) {
+					if (sig_sub->isstr) {
+						output(j, sig_sub->valS, NOTHING);
+						free(sig_sub->valS);
+					} else {
+						sig_sub->val[VAL_STR_MAX-1] = '\0';
+						output(j, sig_sub->val, NOTHING);
+					}
+				} else {
+					ondataempty(j,sig_sub);
+				}
 			}
 			sig_sub->is_updated=0;
+			if (sig_sub->daq_type == FREERUN_ASYNCHRONOUS)
+				pthread_mutex_unlock(&sig_sub->lock);
 		}
 	}
-	if (!samplermod_data.plotmode == driveGnuPlot) {
+	if (!sampler_setting.plotmode == driveGnuPlot) {
 		fputc('\n',stdout);
 	}
 }
 
+/* Check if spurious run.
+   This will help filter away samples made in vain because file-monitor
+   fired of events which led to no match. If all MONITOR tasks did not
+   produce any valid data AND this was not rate-monotonic run, output will
+   be silenced. Works currently only for pure event-driven usage as SAMPLER
+   can't detect the difference of the reason for running each iteration.
+   Need mqueues for that.
+
+   TBD Don't we have that now (1400524)? Check if this test is still needed
+ */
+int certified_run(const handle_t list) {
+	int rc,i,j;
+	struct node *np;
+	struct sig_sub *sig_sub;
+	struct sig_data *sig_data;
+	struct smpl_signal *smpl_signal;
+	int num_umon=0; /*Number of monitors with new data */
+
+	if (sampler_data.files_monitored==0) {
+		/* This is not a pure event-driven configuration */
+		return 1;
+	}
+
+	for(np=mlist_head(list); np; np=mlist_next(list)){
+		assert_ext(np->pl);
+
+		smpl_signal=(struct smpl_signal *)(np->pl);
+		sig_data=&((*smpl_signal).sig_data);
+		for(j=0; j<sig_data->nsigs; j++){
+			sig_sub=&((sig_data->sig_sub)[j]);
+			sig_sub->val[VAL_STR_MAX-1] = '\0';
+			if ((sig_sub->is_updated) &&
+				(sig_sub->daq_type==LOCKSTEP_NOTIFIED))
+			{
+				num_umon++;
+			}
+		}
+	}
+	return num_umon;
+}
+
+/* Print a integer that is in uS in seconds with 6 fixed fractions and
+ * correctly signed. This macro is specific to snprintf_fdiag
+ * */
+#define PRINT_uS_TIME_VALUE( T )                                        \
+    tval   = T;                                                         \
+    is_neg = tval<0;0;1;                                                \
+    tval   = abs(tval);                                                 \
+                                                                        \
+    if (is_neg)                                                         \
+        n=snprintf(&S[i],sz-i-tot,"%c-%d.%06d",                         \
+            sampler_setting.delimiter, tval/1000000, tval%1000000);     \
+    else                                                                \
+        n=snprintf(&S[i],sz-i-tot,"%c%d.%06d",                          \
+            sampler_setting.delimiter, tval/1000000, tval%1000000);     \
+
+/* Print formatted diagnostics to passed-by-reference out string 'S' of max
+ * size 'sz'. Variable 'where' is a index telling where in the string to start.
+ *
+ * Returns total characters printed.
+ * */
+static int snprint_fdiag(char *S, int sz, int where) {
+	int c,i,n;
+	int tot=0;
+
+	/* 'format_ary' never changes after launch. I.e. safe to use without locks */
+	for (
+		n=0, i=where, c=0;
+		sampler_data.diag.format_ary[c] && i<DIAG_MAX_SLEN;
+		i+=n, tot+=n, c++
+	) {
+		assert_ext(c < DIAG_MAX_COLS);
+		BEGIN_RD(&sampler_data.diag_lock)
+			int tval;
+			int is_neg;
+
+			switch (sampler_data.diag.format_ary[c]) {
+				case EXEC_TIME:
+					PRINT_uS_TIME_VALUE(sampler_data.diag.texec);
+					break;
+				case PERIOD_TIME_BEGIN:
+					PRINT_uS_TIME_VALUE(
+						sampler_data.diag.tp1);
+					break;
+				case PERIOD_TIME_HARVESTED:
+					PRINT_uS_TIME_VALUE(sampler_data.diag.tp2);
+					break;
+				case SMPL_ID:
+					n=snprintf(&S[i],sz-i-tot,"%c%d",
+						sampler_setting.delimiter,
+						sampler_data.diag.smplID);
+					break;
+				case TRIG_BY_ID:
+					n=snprintf(&S[i],sz-i-tot,"%c%d",
+						sampler_setting.delimiter,
+						sampler_data.diag.triggID);
+					break;
+				default:
+					n=snprintf(&S[i],sz-i-tot,"%cFORMAT-ERROR",
+						sampler_setting.delimiter);
+			}
+		END_RD(&sampler_data.diag_lock)
+	}
+	return tot;
+}
+
 /* Harvest finished sample and print it */
 void harvest_sample(const handle_t list) {
-		static struct timeval tlast = {0,0};
+	if (certified_run(list)) {
+		static struct timeval t1last = {0,0};
+		static struct timeval t2last = {0,0};
 		static int first = 1;
-		struct timeval tnow1,tnow2;
-		struct timeval tdiff;
-		int uComp;
-		struct timeval tv_comp;
-		struct timespec hr_tnow;
+		struct timeval tnow;
+		struct timeval tstart;
+		char diagS[DIAG_MAX_SLEN];
+		int diagS_idx=0;
 
-		assert_ext(time_now(&hr_tnow) == 0);
-		/* Down-scale. Kernel log doesn't show better res than us anyway.
-		 * int-div can't be more costly than outputting 3 extra characters.
-		 * Might want higher resolution for time-keeping later though, which
-		 * should give more precise time calculation and minimize (positive)
-		 * drift when jitter-compensate. */
-		tnow1.tv_sec = hr_tnow.tv_sec;
-		tnow1.tv_usec = hr_tnow.tv_nsec/1000;
+		BEGIN_RD(&sampler_data.sampler_data_lock)
+			tstart=sampler_data.tstarted;
+		END_RD(&sampler_data.sampler_data_lock)
 
-		if (first) {
-			first = 0;
-			tlast=tnow1;
-		}
+		BEGIN_WR(&sampler_data.diag_lock)
+			assert_ign(time_now(&tnow) == 0);
+			sampler_data.diag.texec=tv_diff_us(tstart,tnow);
 
-		tdiff=tv_diff(tlast,tnow1);
-		if (samplermod_data.plotmode == driveGnuPlot) {
+			if (first) {
+				first = 0;
+			} else {
+				sampler_data.diag.tp2=tv_diff_us(t2last,tnow);
+				sampler_data.diag.tp1=tv_diff_us(t1last,tstart);
+			}
+
+		END_WR(&sampler_data.diag_lock);
+		t2last = tnow;
+		t1last = tstart;
+
+		if (sampler_setting.plotmode == driveGnuPlot) {
 			printf("0:%d.%06d\n1:%d.%06d\n",
-				SEC(tnow1),USEC(tnow1),SEC(tdiff),USEC(tdiff));
+				SEC(tstart),
+				USEC(tstart),
+
+				sync_get(&sampler_data.diag_lock,
+					&sampler_data.diag.tp2)/1000000,
+				sync_get(&sampler_data.diag_lock,
+					&sampler_data.diag.tp2)%1000000
+			);
 		} else {
-			printf("%d.%06d%c%d.%06d",
-				SEC(tnow1),USEC(tnow1),
-				samplermod_data.delimiter,
-				SEC(tdiff),USEC(tdiff));
+			diagS_idx=snprintf     ( diagS, DIAG_MAX_SLEN, "#0");
+			diagS_idx=snprint_fdiag( diagS, DIAG_MAX_SLEN, diagS_idx)+diagS_idx;
+			assert_ext(diagS_idx<DIAG_MAX_SLEN);
+			printf("%d.%06d%c{%s}",
+				SEC(tstart),
+				USEC(tstart),
+				sampler_setting.delimiter,
+				diagS
+			);
 		}
 
 		collect_and_print(list);
-		++samplermod_data.smplcntr;
-
-		assert_ext(time_now(&hr_tnow) == 0);
-		tnow2.tv_sec = hr_tnow.tv_sec;
-		tnow2.tv_usec = hr_tnow.tv_nsec/1000;
-		tdiff=tv_diff(tlast,tnow2);
-
-		tv_comp = tv_diff(
-			(struct timeval){0,samplermod_data.ptime},
-			tdiff
-		);
-		uComp = USEC(tv_comp);
-
-		if (uComp > samplermod_data.ptime)
-			uComp = 1000000 - uComp;
-
-		tlast = tnow2;
-		//assert(uComp<samplermod_data.ptime);
-		if (uComp>=samplermod_data.ptime) {
-#ifdef never
-			/* Don't warn. Disturbs time even more */
-			fprintf(stderr,"Cant compensate jitter: %d us (%d.%05d)\n",
-			uComp,SEC(tdiff),USEC(tdiff));
-#endif
-			uComp=0;
-		}
-		usleep(samplermod_data.ptime/*-uComp*/);
+		/* Current ID is changed last of all. I.e. it's the current ID
+		   for next iteration and is for a short time not accurate */
+		sync_add(&sampler_data.diag_lock, &sampler_data.diag.smplID, 1);
+	}
 }
 

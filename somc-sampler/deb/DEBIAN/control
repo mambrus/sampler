@@ -1,0 +1,9 @@
+Package: somc-sampler
+Architecture: all
+Version:
+Depends: somc-feedgnuplot
+Recommends: konsole
+Maintainer: Jurijs Oniscuks <jurijs.oniscuks@sonymobile.com>
+Section: devel
+Priority: optional
+Description: SONY sampler tool

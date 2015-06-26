@@ -27,3 +27,9 @@ struct mlistmod_struct mlistmod_data = {
 	.nlists = 0,
 	.mlists = NULL,
 };
+
+struct mlistmod_settings mlistmod_settings = {
+	.isinit = 0,
+	.debuglevel = -1,
+	.verbose = 0,
+};

@@ -1,0 +1,1946 @@
+#!/usr/bin/python
+
+import bisect
+import imp
+import itertools
+import operator
+import optparse
+import os
+import pipes
+import pprint
+import re
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import traceback
+import types
+import math
+
+import cProfile, pstats, StringIO
+
+import sampler_data_spc
+
+FEEDGNUPLOT_DISCONTINUITY_VALUE = "NO_SIG"
+FEEDGNUPLOT_INTERPOLATE_VALUE = "_"
+
+# MMB stands for Multiline Match Buffer
+class MMB:
+    def __init__(self, patterns):
+        self.buffer = []
+        self.patterns = patterns # list of patterns, each pattern is a list of regexps, one regexp per line
+        self.depths = [0] * len(patterns) # state for each pattern, how deep each pattern has achieved
+    def is_lagging(self):
+        return len(self.buffer) > 0
+    def put(self, line):
+        self.buffer.append(line)
+        # recalculate depths
+        for i in xrange(0, len(self.patterns)):
+            depth = self.depths[i]
+            regexps = self.patterns[i]
+            if regexps[depth].match(self.buffer[-1]):
+                depth += 1
+            else:
+                # backtracking
+                while depth > 0:
+                    if all([regexps[j].match(self.buffer[j-depth]) != None for j in xrange(0, depth)]):
+                        break # found match in buffer at smaller depth
+                    else:
+                        depth -= 1 # try even smaller depth
+            self.depths[i] = depth
+    def get(self, flush=False):
+        # find patterns which are "fully found", which means self.depths[j] == len(self.patterns[j])
+        # from all "fully found" patterns choose one with largest depth but smallest index (by using 'min()')
+        matches = [(-len(self.patterns[j]), j) for j in xrange(0, len(self.patterns)) if self.depths[j] == len(self.patterns[j])]
+        i = min(matches)[1] if len(matches) > 0 else None
+        if i != None:
+            depth = self.depths[i]
+            regexps = self.patterns[i]
+            mark_depth = depth
+        else:
+            mark_depth = max(self.depths)
+        # everything older than mark_depth (if any) is not going to be reported as belonging to a pattern
+        mark = None if mark_depth == 0 else -mark_depth
+        for l in self.buffer[:mark]:
+            yield (None, l)
+        if i != None:
+            # yield every line as belonging to a found pattern
+            for n, l in itertools.izip(xrange(0,depth),self.buffer[-depth:]):
+                yield ((i, n), l)
+            self.buffer = []
+            self.depths = [0] * len(self.patterns)
+        else:
+            self.buffer[:mark] = []
+            if flush:
+                for l in self.buffer:
+                    yield (None, l)
+                self.buffer = []
+                self.depths = [0] * len(self.patterns)
+
+class Timer(threading.Thread):
+    def __init__(self):
+        threading.Thread.__init__(self)
+        self.scheduled, self.function, self.args, self.kwargs = None, None, None, None
+        self._delivered = False
+        self._exit = False
+        self.condition = threading.Condition()
+        self.setDaemon(True)
+
+    def __enter__(self):
+        return self.condition.__enter__()
+
+    def __exit__(self, *args):
+        return self.condition.__exit__(*args)
+
+    def schedule(self, interval, function, args=[], kwargs={}):
+        self.scheduled, self.function, self.args, self.kwargs = time.time() + interval, function, args, kwargs
+        self._delivered = False
+        self.condition.notify()
+
+    def cancel(self):
+        self.scheduled, self.function, self.args, self.kwargs = None, None, None, None
+        self._delivered = False
+        self.condition.notify()
+
+    def exit(self):
+        self._exit = True
+        self.cancel()
+
+    def delivered(self):
+        return self._delivered
+
+    def run(self):
+        with self.condition:
+            while not self._exit:
+                if self.scheduled:
+                    time_left = self.scheduled - time.time()
+                    # print "*** Timer.run time_left = %r" % time_left
+                    if time_left > 0:
+                        self.condition.wait(time_left)
+                    else:
+                        # print "*** Timer.run calling callback"
+                        self.function(*self.args, **self.kwargs)
+                        self.scheduled, self.function, self.args, self.kwargs = None, None, None, None
+                        self._delivered = True
+                else:
+                    self.condition.wait()
+
+class MMBWithTimeout:
+    def __init__(self, patterns, timeout, callback):
+        # callback may be invoked from either main thread or working
+        # thread but it is guaranteed that only one "callback()" is
+        # running at a time
+        self.mmb = MMB(patterns)
+        self.timeout = timeout
+        self.callback = callback
+        self.timer = Timer()
+        self.timer.start()
+    def exit(self):
+        with self.timer:
+            self.timer.exit()
+        self.timer = None
+    def put(self, line):
+        with self.timer:
+            self.mmb.put(line)
+            for tag, line in self.mmb.get():
+                self.callback(tag, line)
+            if self.mmb.is_lagging():
+                self.timer.schedule(self.timeout, self.__internal_flush)
+    def flush(self):
+        with self.timer:
+            self.mmb.cancel()
+            self.__internal_flush()
+    def __internal_flush(self):
+        for tag, line in self.mmb.get(flush=True):
+            self.callback(tag, line)
+
+class GnuplotOutputFilter(threading.Thread):
+    def __init__(self, stream_in, stream_out):
+        threading.Thread.__init__(self)
+        self.stream_in = stream_in
+        self.stream_out = stream_out
+        self.mmb = MMBWithTimeout(
+            [[re.compile(r'^\s*$'),
+              re.compile(r'^gnuplot> plot.*$'),
+              re.compile(r'^\s*\^\s*$'),
+              re.compile(r'^\s*line\s+\d+:\s*warning:\s*Skipping data file with no valid points.*$'),
+              ],
+             [re.compile(r'^\s*$'),
+              re.compile(r'^gnuplot> [e\d].*$'),
+              re.compile(r'^\s*\^\s*$'),
+              re.compile(r'^\s*line\s+\d+:\s*invalid command.*$'),
+              ],
+             [re.compile(r'^\s*line\s+\d+:\s*warning:\s*Skipping data file with no valid points.*$'),
+              ],
+             ],
+            0.2, self.callback)
+    def callback(self, tag, line):
+        if tag == None:
+            print >>self.stream_out, line,
+    def run(self):
+        while self.mmb:
+            # do not use iterator over "file" as it uses buffering
+            line = self.stream_in.readline()
+            if line == "":
+                break
+            if self.mmb:
+                self.mmb.put(line)
+        if self.mmb:
+            self.mmb.exit()
+    def exit(self):
+        self.mmb.exit()
+        self.mmb = None
+        self.stream_in.close()
+
+class FileWriter:
+    def __init__(self, filename):
+        self.file = sys.stdout if filename == "-" else file(filename, 'w')
+    def write(self, line):
+        print >>self.file, line
+        self.file.flush()
+    def close(self):
+        if self.file != sys.stdout:
+            self.file.close()
+
+class RecordedLinesFromSampler(object):
+    def __init__(self, plot):
+        self.plot = plot
+        self.f = None
+    def __enter__(self):
+        return self
+    def __exit__(self, type_, value, traceback):
+        if self.f:
+            self.f.close()
+            self.f = None
+    def lines(self):
+        filename = self.plot.options.read_data_sampler
+        self.f = sys.stdin if filename == "-" else file(filename)
+        for line in self.f.readlines():
+            yield line
+
+class WaitForDevice(threading.Thread):
+    connected = False
+    @staticmethod
+    def wait(options):
+        if not WaitForDevice.connected:
+            WaitForDevice(options).wait_impl()
+            WaitForDevice.connected = True
+    def __init__(self, options):
+        threading.Thread.__init__(self)
+        self.options = options
+        self.connected = False
+        self.finished = threading.Event()
+    def wait_impl(self):
+        self.setDaemon(True)
+        self.connected = False
+        args = [self.options.adb, "-d", "wait-for-device"]
+        cmd = ' '.join(args)
+        if self.options.debug >= 1: print "[WAIT-FOR-DEVICE]: %s" % (cmd)
+        self.start()
+        os.system(cmd)
+        self.connected = True
+        self.finished.set()
+    def run(self):
+        self.finished.wait(1)
+        if not self.connected:
+            print >>sys.stderr, "- waiting for device -"
+
+class LinesFromAdbShell(object):
+    def __init__(self, options):
+        self.options = options
+        self.f = None
+        self.proc = None
+    def __enter__(self):
+        return self
+    def __exit__(self, type_, value, traceback):
+        o = self.options
+        if self.f:
+            self.f.close()
+            self.f = None
+        if self.proc:
+            self.proc.kill()
+            self.proc.wait()
+            self.proc = None
+    def findlines(self, shell_args, tag=None, regex=None, group=None):
+        if tag == None: tag = "SHELL"
+        o = self.options
+        if not o.host:
+            WaitForDevice.wait(o)
+        args = (["exec"] + ([] if o.host else [o.adb, "-d", "shell"]) + shell_args)
+        cmd = ' '.join(args)
+        if o.debug >= 1: print "[%s]: %s" % (tag, cmd)
+        self.proc = subprocess.Popen(cmd,
+                                     stdout=subprocess.PIPE,
+                                     shell=True,
+                                     close_fds=True,
+                                     bufsize=0)
+        self.f = self.proc.stdout
+        while True:
+            # do not use iterator over "file" as it uses buffering
+            line = self.f.readline()
+            if line == "":
+                break
+            line = line.rstrip("\n\r")
+            if o.debug >= 4: print "[<<%s]: %s" % (tag, line)
+            result = None
+            if regex:
+                match = regex.match(line)
+                if match:
+                    if group == None:
+                        result = match
+                    elif type(group) == types.FunctionType:
+                        result = group(match)
+                    else:
+                        result = match.group(group)
+            else:
+                result = line
+            if result:
+                yield result
+
+class DynamicLinesFromSampler(LinesFromAdbShell):
+    def __init__(self, plot):
+        super(DynamicLinesFromSampler, self).__init__(plot.options)
+        self.plot = plot
+        self.ini_filename = None
+    def __exit__(self, type_, value, traceback):
+        super(DynamicLinesFromSampler, self).__exit__(type_, value, traceback)
+        if self.ini_filename:
+            try:
+                os.unlink(self.ini_filename)
+            except:
+                pass
+            self.ini_filename = None
+    def export_sigs_file(self):
+        o = self.plot.options
+        if o.do_not_push_ini or o.sampler_no_args:
+            return o.sigs_file
+        else:
+            adaptor_signal = sampler_data_spc.build_adaptor_signal(None, None)
+            adaptor_common = sampler_data_spc.build_adaptor_common(None, None)
+            fd, self.ini_filename = tempfile.mkstemp(".ini", "sampler-config-")
+            if o.debug >= 1: print "[EXPORT-INI]: %s" % (self.ini_filename,)
+            d = obj2dict(o)
+            d['signals'] = obj2dict(self.plot.spc_loader.signals)
+            config_options = sampler_data_spc.export(adaptor_common, adaptor_signal, os.fdopen(fd, "w"), d)
+            if o.host:
+                return self.ini_filename
+            else:
+                args = ["exec", o.adb, "-d", "push", self.ini_filename, o.sigs_file]
+                if not o.debug >= 1: args.append("2>/dev/null")
+                cmd = ' '.join(args)
+                if o.debug >= 1: print "[PUSH-INI]: %s -> %s" % (self.ini_filename, o.sigs_file)
+                os.system(cmd)
+                try:
+                    os.unlink(self.ini_filename)
+                except:
+                    pass
+                self.ini_filename = None
+                return o.sigs_file
+    def maybe_push(self):
+        o = self.plot.options
+        if o.host or o.do_not_push:
+            return
+        for src, dst in o.push:
+            args = ["exec", o.adb, "-d", "push", src, dst]
+            if not o.debug >= 1: args.append("2>/dev/null")
+            cmd = ' '.join(args)
+            if o.debug >= 1: print "[PUSH]: %s -> %s" % (src, dst)
+            os.system(cmd)
+    def lines(self):
+        o = self.plot.options
+        if not o.host:
+            WaitForDevice.wait(o)
+        sigs_filename = self.export_sigs_file()
+        self.maybe_push();
+        if o.do_not_sample:
+            return []
+        args = (([o.invoke_sampler if o.invoke_sampler else (o.host_sampler if o.host else o.android_sampler)])
+                + (["-s ", sigs_filename] if sigs_filename and not o.sampler_no_args else []) # however -s is mandatory
+                + (["-T ", str(o.period)] if o.period > 0 and not o.sampler_no_args else [])
+                + ([o.extra] if o.extra and not o.sampler_no_args else []))
+        return self.findlines(args, tag="SAMPLER")
+
+class special_token():
+    def __init__(self, name):
+        self.name = "TOKEN_" + name.upper()
+    def __repr__(self):
+        return self.name
+
+TOKEN_OPEN  = special_token('open')
+TOKEN_CLOSE = special_token('close')
+
+def tokenize(line, debug=False):
+    end_re = re.compile(r'}|;')
+    pos = 0
+    has_next_item = pos < len(line)
+    while pos < len(line):
+        if line[pos] == "{":
+            yield TOKEN_OPEN
+            pos += 1
+            has_next_item = pos < len(line) and line[pos] != "}"
+        else:
+            m = end_re.search(line, pos)
+            if m:
+                item, sep, pos = line[pos:m.start()], m.group(), m.end()
+            else:
+                item, sep, pos = line[pos:], "", len(line)
+            if item != "" or has_next_item:
+                yield item
+            if sep == "}":
+                has_next_item = False
+                yield TOKEN_CLOSE
+            elif sep == ";":
+                has_next_item = True
+            else:
+                has_next_item = False
+    if has_next_item:
+        yield ""
+
+# parse() uses stack for handling recursive groups
+def parse(line):
+    stack = [[]]
+    for token in tokenize(line):
+        if token == TOKEN_OPEN:
+            stack.append([])
+        elif token == TOKEN_CLOSE:
+            stack[-2].append(stack[-1])
+            del stack[-1]
+        else:
+            stack[-1].append(token.strip())
+    if len(stack) != 1:
+        raise Exception("mismatch parenthesis in line %r" % (line,))
+    return stack[0]
+
+def parsed_samples(plot):
+    re_split = re.compile(r'\s*;\s*')
+    header = True # to be able to skip header
+    backup = plot.open_for_write_data_sampler()
+    with plot.lines_from_sampler() as lines_source:
+        for line in lines_source.lines():
+            if backup:
+                backup.write(line)
+            if header and len(line) > 0 and (line[0].isdigit() or line.startswith("NO_SIG")): #@todo hardcoded NO_SIG
+                header = False
+            items = parse(line.rstrip("\n\r"))
+            # workaround to ignore diagnostics data from "sampler"
+            if len(items) >= 2 and type(items[1]) == list and len(items[1]) >= 1 and items[1][0] == "#0":
+                items[1] = "0"
+            yield (header, items)
+
+num_re = re.compile(r'^-?\d*\.?\d+([Ee][-+]?\d+)?$')
+
+class SignalContext:
+    def __init__(self):
+        self.T0 = None
+
+class NormalizeContext:
+    def __init__(self, signal, window_size, expr_center, index):
+        self.signal      = signal
+        self.window_size = window_size
+        self.expr_center = expr_center
+        self.index       = index
+
+class SignalEvalCancelled(Exception):
+    def __init__(self):
+        Exception.__init__(self, "SignalEvalCancelled")
+
+class SignalNotEnoughPastData(Exception):
+    def __init__(self, normalize_context):
+        Exception.__init__(self, "SignalNotEnoughPastData")
+        self.normalize_context = normalize_context
+
+class SignalNotEnoughFutureData(Exception):
+    def __init__(self, min_clock_center, normalize_context):
+        Exception.__init__(self, "SignalNotEnoughFutureData")
+        self.min_clock_center = min_clock_center
+        self.normalize_context = normalize_context
+
+class DTZero(Exception):
+    def __init__(self):
+        Exception.__init__(self, "DTZero")
+
+class Object(object):
+    def __init__(self):
+        pass
+
+class Signal(Object):
+    def __init__(self, options, dictionary):
+        super(Signal, self).__init__()
+        self._options = options
+        self._signal_values = []
+        self._signal_expr_center = -1
+        self._signal_clock = None
+        for k in dictionary.keys():
+            setattr(self, k, dictionary[k])
+        self.profile = cProfile.Profile()
+        self.profile_time = None
+        self.profile_result = None
+    def profile_prepare(self):
+        self.profile.enable()
+        s = StringIO.StringIO()
+        self.profile.disable()
+        sortby = 'cumulative'
+        ps = pstats.Stats(self.profile, stream=s).sort_stats(sortby)
+        ps.print_stats()
+        self.profile_time = ps.total_tt
+        self.profile_result = s.getvalue()
+    def profile_time(self):
+        if self.profile_stats == None:
+            self.profile_prepare()
+        return self.profile_stats.total_tt
+    def profile_print(self):
+        if self.profile_result == None:
+            self.profile_prepare()
+        print "[SIGNAL-PROFILE-STATS] signal=%s clock=%s used %.3f seconds" % (self.id, self._signal_clock.id, self.profile_time)
+        if self._options.debug >= 3:
+            print "[SIGNAL-PROFILE-STATS-DETAILS-BEGIN]"
+            print self.profile_result
+            print "[SIGNAL-PROFILE-STATS-DETAILS-END]"
+    def __len__(self):
+        return len(self._signal_values)
+    def range(self):
+        length = len(self._signal_values)
+        clock_center = self._signal_clock._clock_center
+        min_index = 0 - (length - 1 - clock_center)
+        max_index = length - (length - 1 - clock_center)
+        return (min_index, max_index)
+    def has_key(self, index):
+        min_index, max_index = self.range()
+        return min_index <= index and index < max_index # @todo and self._signal_getitem_raw(index) != delayed
+    def _signal_normalize_index(self, index, add):
+        o = self._options
+        index_orig = index
+        add_orig = add
+        if index != None:
+            length = len(self._signal_values)
+            clock_center = self._signal_clock._clock_center
+            index = length - 1 - clock_center + index
+            if index < 0:
+                if o.debug >= 4: print "[SIGNAL-NORMALIZE-INDEX]: signal=%s clock=%s clock_center=%r index_orig=%r add_orig=%r index=%r length=%r -> too little" % (self.id, self._signal_clock.id, clock_center, index_orig, add_orig, index, length)
+                window_size = self._signal_clock._signal_window_size
+                self._signal_clock._clock_require_min_window_size(self, length - index)
+                normalize_context = NormalizeContext(self, window_size, clock_center, index_orig)
+                raise SignalNotEnoughPastData(normalize_context)
+            elif index >= length:
+                if o.debug >= 4: print "[SIGNAL-NORMALIZE-INDEX]: signal=%s clock=%s clock_center=%r index_orig=%r add_orig=%r index=%r length=%r -> too much" % (self.id, self._signal_clock.id, clock_center, index_orig, add_orig, index, length)
+                window_size = self._signal_clock._signal_window_size
+                normalize_context = NormalizeContext(self, window_size, clock_center, index_orig)
+                raise SignalNotEnoughFutureData(clock_center + 1 + index - length, normalize_context)
+            elif self._signal_values[index] == delayed:
+                if o.debug >= 4: print "[SIGNAL-NORMALIZE-INDEX]: signal=%s clock=%s clock_center=%r index_orig=%r add_orig=%r index=%r length=%r -> delayed" % (self.id, self._signal_clock.id, clock_center, index_orig, add_orig, index, length)
+                window_size = self._signal_clock._signal_window_size
+                normalize_context = NormalizeContext(self, window_size, clock_center, index_orig)
+                raise SignalNotEnoughFutureData(clock_center + 1, normalize_context)
+            index += add
+        return index
+    def __getitem__(self, key):
+        if type(key) == slice:
+            if len(self._signal_values) > 0:
+                return self._signal_values[slice(self._signal_normalize_index(key.start, 0), self._signal_normalize_index(key.stop, 1), key.step)]
+            else:
+                return []
+        else:
+            if len(self._signal_values) > 0:
+                return self._signal_values[self._signal_normalize_index(key, 0)]
+            else:
+                return None
+    def _signal_getitem_raw(self, index):
+        length = len(self._signal_values)
+        clock_center = self._signal_clock._clock_center
+        index = length - 1 - clock_center + index
+        return self._signal_values[index] if 0 <= index and index < length else None
+    def _signal_set_clock(self, clock):
+        self._signal_clock = clock
+    def _signal_setup_expr_center(self):
+        o = self._options
+        self._signal_clock._clock_setup_expr_center(self._signal_expr_center)
+        if o.debug >= 4: print "[SIGNAL-SETUP-EXPR-CENTER]: signal=%s clock=%s signal_expr_center=%r -> %r" % (self.id, self._signal_clock.id, self._signal_expr_center, self._signal_clock._signal_values[-1-self._signal_expr_center])
+    def _signal_push(self, value, time=False):
+        # always pushes at the end of a window
+        self._signal_values.append(value)
+        self._signal_expr_center += 1
+        if time:
+            oldest = value - self._options.window
+            pos_oldest = bisect.bisect_left(self._signal_values, 0.5)
+            window_size = len(self._signal_values) - pos_oldest
+            self._signal_clock._signal_window_size = window_size
+        else:
+            window_size = self._signal_clock._signal_window_size
+        if len(self._signal_values) > window_size:
+            del self._signal_values[:-window_size]
+    def _signal_set(self, value):
+        pos = -self._signal_expr_center - 1
+        self._signal_values[pos] = value
+    def _signal_eval_expr_and_set(self, value_raw, delay_future=True):
+        # @todo big problem: this method works correctly only for
+        # signals with expr_center=0. Workaround is to never redefine
+        # "expr" formula for physical signals.
+        pos = -self._signal_expr_center - 1
+        try:
+            value = None
+            if type(value_raw) == str:
+                if value_raw == self.nosig:
+                    value_raw = None
+                elif num_re.match(value_raw):
+                    value_raw = float(value_raw)
+            if hasattr(self.expr, "__call__"):
+                value = self.expr(value_raw)
+            else:
+                # constant expression
+                value = self.expr
+            self._signal_values[pos] = value
+        except DTZero, e:
+            self._signal_values[pos] = interpolate
+        except SignalNotEnoughPastData, e:
+            o = self._options
+            nc = e.normalize_context
+            if o.debug >= 1: print "[NOT-ENOUGH-PAST-DATA]: referrent(id=%s %s[0]=%r) referral=(id=%s %s[oldest]=%r window=%r size=%r expr_center=%r offset=%r) " % (self.id, self._signal_clock.id, self._signal_clock[0], nc.signal.id, nc.signal._signal_clock.id, nc.signal._signal_clock._signal_values[0], nc.window_size, len(nc.signal._signal_values), nc.expr_center, nc.index)
+            self._signal_values[pos] = None
+        except SignalNotEnoughFutureData, e:
+            if delay_future:
+                self._signal_clock._clock_require_min_clock_center(self, self._signal_expr_center)
+                # keep "delayed"
+            else:
+                # there is no future, treat it as the past
+                o = self._options
+                nc = e.normalize_context
+                if o.debug >= 1: print "[NOT-ENOUGH-FUTURE-DATA]: referrent(id=%s %s[0]=%r) referral=(id=%s %s[newest]=%r window=%r size=%r expr_center=%r offset=%r) " % (self.id, self._signal_clock.id, self._signal_clock[0], nc.signal.id, nc.signal._signal_clock.id, nc.signal._signal_clock._signal_values[-1], nc.window_size, len(nc.signal._signal_values), nc.expr_center, nc.index)
+                self._signal_values[pos] = None
+        return self._signal_values[pos]
+    def _signal_compile(self):
+        g_items = []
+        g_items.extend(self.module.__dict__.items())
+        g_items.extend(self.vars.items()) # this is for compatibility only
+        g_items.extend(self._signal_clock._clock_get_dict())
+        g = dict(g_items)
+        self.expr = eval(self.expr, g)
+        self.scale = eval(self.scale, g)
+    def _signal_plot_expr_single(self, x, f):
+        v = self[0]
+        if v == None or v == interpolate:
+            pass
+        else:
+            v = f(v)
+        return v
+    def _signal_plot_expr_for_time_any(self, time_any):
+        v = None
+        if self.has_key(0):
+            if self._signal_clock[0] == time_any[0]:
+                v = self[0]
+            else:
+                v = interpolate
+        if type(v) != types.TupleType:
+            v = (v,)
+        #if self._options.debug >= 1: print "[NOT-ENOUGH-PAST-DATA]: referrent(id=__plot__ time_any[0]=%r) referral=(id=%s %s[oldest]=%r window=%r size=%r expr_center=None offset=0) " % (time_any[0], self.id, self._signal_clock.id, self._signal_clock._signal_values[0] if len(self._signal_clock._signal_values) > 0 else None , self._signal_clock._signal_window_size, len(self._signal_values))
+        return v
+    def _signal_plot_expr_multi(self, x, signals):
+        return [s._signal_plot_expr_for_time_any(self._signal_clock) for s in signals]
+    def _signal_format(self, limit=5):
+        values = self._signal_values
+        len_values = len(values)
+        offset_current = -len(values) + 1 + self._signal_clock._clock_center
+        offset_expr    = -len(values) + 1 + self._signal_expr_center
+        def item_format(index, value):
+            index_current = offset_current + index
+            index_expr    = offset_expr    + index
+            if ((index == 0) or
+                (index == len_values-1) or
+                (-limit <= index_current and index_current <= limit) or
+                (-limit <= index_expr    and index_expr    <= limit)):
+                return "%d%s: %r" % (index_current,
+                                     ("E" if index_expr == 0 else ""),
+                                     value)
+            elif ((index == 1) or
+                  (index_current == limit+1) or
+                  (index_expr    == limit+1)):
+                return "..."
+            else:
+                return None # skip this item
+        data = [item_format(i, v) for i, v in enumerate(values)]
+        return "(%s)" % ", ".join([s for s in data if s != None])
+        #return "W=%r E=%r V=%r" % (self._signal_clock._signal_window_size, self._signal_expr_center, values)
+    def _signal_is_clock(self):
+        return False
+    def zip(self, others, index_min=None, index_max=None, time_min=None, time_max=None):
+        signals = [self] + list(others)
+        ranges = [s.range() for s in signals]
+        min_index = max([r[0] for r in ranges]+([index_min] if index_min != None else []))
+        max_index = min([r[1] for r in ranges]+([index_max] if index_max != None else []))
+        return [tuple([s[i] for s in signals]) for i in range(min_index, max_index)]
+
+class Clock(Signal):
+    def __init__(self, options, dictionary):
+        super(Clock, self).__init__(options, dictionary)
+        self._signal_window_size = 1
+        self._clock_center = 0
+        self._clock_defined = False
+        self._clock_gap_begin = None
+        # self is clock_T
+        self.t  = Signal(self._options, {'id': "%s.t"  % self.id})
+        self.dt = Signal(self._options, {'id': "%s.dt" % self.id})
+        for s in [self, self.t, self.dt]:
+            s._signal_set_clock(self)
+    def _clock_get_dict(self):
+        return [('T', self), ('t', self.t), ('dt', self.dt)]
+    def _clock_maybe_push(self, T0, value):
+        # always pushes at the end of a window
+        if type(value) == str:
+            if value == self.nosig:
+                self._clock_defined = False
+                return None
+            else:
+                value = float(value)
+        T_prev = self._signal_values[-1] if len(self._signal_values) > 0 else None
+        o = self._options
+        if o.debug >= 4: print "[CLOCK-PUSH]: clock=%s time=%r" % (self.id, value)
+        self._signal_push(value, time=True)
+        self.t._signal_push((value - T0) if T0 != None else 0)
+        self.dt._signal_push((value - T_prev) if T_prev != None else 0)
+        self._signal_expr_center = 0
+        self.t._signal_expr_center = 0
+        self.dt._signal_expr_center = 0
+        self._clock_defined = True
+        return value
+    def _clock_is_defined(self):
+        return self._clock_defined
+    def _signal_is_clock(self):
+        return True
+    def _clock_setup_expr_center(self, center):
+        self._clock_center = center
+    def _clock_find_expr_center(self, T):
+        self._clock_center = len(self._signal_values) - bisect.bisect_right(self._signal_values, T)
+    def _clock_require_min_clock_center(self, signal, min_clock_center):
+        o = self._options
+        if o.debug >= 4: print "[ADJUST-SIGNAL-CLOCK-CENTER]: increasing %d -> %d time=%r signal.id=%r" % (signal._signal_expr_center, min_clock_center, self._signal_values[-1], signal.id)
+        grow = min_clock_center - signal._signal_expr_center
+        signal._signal_expr_center = min_clock_center
+        if grow > 0:
+            self._signal_window_size += grow
+    def _clock_require_min_window_size(self, signal, min_window_size):
+        if self._signal_window_size < min_window_size:
+            o = self._options
+            if o.debug >= 2:
+                print "[ADJUST-WINDOW-SIZE]: increasing %d -> %d clock.id=%s time=%r signal.id=%s" % (self._signal_window_size, min_window_size, self.id, self._signal_values[-1], signal.id)
+            self._signal_window_size = min_window_size
+    def _clock_maybe_report_gap(self, time_any, flush=False):
+        if self._clock_gap_begin != None:
+            if (self.has_key(0) and time_any[0] - self[0] < 1) or flush:
+                if self._options.debug >= 1:
+                    print "[GAP]: gap detected on clock %r: [%r .. %r]" % (self.id, self._clock_gap_begin, time_any[0])
+                self._clock_gap_begin = None
+        else:
+            if self.has_key(0):
+                if time_any[0] - self[0] > self._options.gap_threshold:
+                    self._clock_gap_begin = self[0]
+            else:
+                self._clock_gap_begin = time_any[0]
+
+class Delayed(object):
+    def __bool__(self):
+        return False
+    def __nonzero__(self):
+        return False
+    def __str__(self):
+        return "delayed"
+    def __repr__(self):
+        return "delayed"
+
+delayed = Delayed()
+
+class Interpolate(object):
+    def __bool__(self):
+        return False
+    def __nonzero__(self):
+        return False
+    def __str__(self):
+        return "interpolate"
+    def __repr__(self):
+        return "interpolate"
+
+interpolate = Interpolate()
+
+def build_index_dict(comment, pairs):
+    d = {}
+    for idx, (key, value) in enumerate(pairs):
+        if d.has_key(key):
+            print >>sys.stderr, "DUPLICATE SIGNAL in %s header: name: %r, columns %d and %d" % (comment, key, idx + 2, d[key][0] + 2)
+            raise Exception("duplicated signal names in %s header" % comment)
+        else:
+            d[key] = (idx, value)
+    return d
+
+def validate_header(plot, sample):
+    o = plot.options
+    sampler_header_pairs = [(name.split("=",1)+[None])[:2] for name in sample]
+    sampler_headers = [pair[0] for pair in sampler_header_pairs]
+    renamed_headers = [pair[1] for pair in sampler_header_pairs]
+    # build a list of pairs (ID, [SIGNAL...]) where ID is signal id and
+    # [SIGNAL...] is a list of signal, associated with the same ID
+    expected_headers = []
+    path = []
+    for s in plot.spc_loader.signals:
+        depth = s.subsignal
+        if depth == True: depth = 1 # backward compatibility with older versions
+        del path[depth:] # reduce path to keep relevant parents
+        if len(path) == 0 or not path[-1].expectable:
+            # add signal or a placeholder if signal is not expectable
+            expected_headers.append([s.id, [s]] if s.expectable else [None, []])
+        elif s.expectable:
+            expected_headers[-1][1].append(s) # one more subsignal
+            if not expected_headers[-1][0]:
+                expected_headers[-1][0] = s.id # fill the placeholder
+        path.append(s)
+    # convert [(ID, [SIGNAL...])...] to [(ID_0, SIGNAL), (ID_1, SIGNAL), (ID_2, SIGNAL)...]
+    expected_headers = reduce(operator.add,
+                              [([(_id, signals[0])] if len(signals) == 1 else [("%s_%d" % (_id, i), s) for i, s in enumerate(signals)])
+                               for _id, signals in expected_headers
+                               if len(signals) > 0],
+                              [])
+    if o.debug >= 1: print "[EXPECTED-HEADER]: %r" % ([pair[0] for pair in expected_headers],)
+    if o.debug >= 1: print "[SAMPLER-HEADER]:  %r" % (sampler_headers,)
+    expected_names = build_index_dict("expected", expected_headers)
+    sampler_names  = build_index_dict("sampler",  [(name, None) for name in sampler_headers])
+    extra_in_expected = set(expected_names.keys()).difference(set(sampler_names.keys()))
+    extra_in_sampler  = set(sampler_names.keys()).difference(set(expected_names.keys()))
+    for name in extra_in_expected:
+        print >>sys.stderr, "HEADER MISMATCH: missing expected signal: %r" % name
+    for name in extra_in_sampler:
+        print >>sys.stderr, "HEADER MISMATCH: received unexpected signal: %r" % name
+    if extra_in_expected or extra_in_sampler:
+        raise Exception("signal name mismatch")
+    for s in plot.spc_loader.signals:
+        s.renamed_id = None
+    for _id, renamed_id, in itertools.izip(sampler_headers, renamed_headers):
+        s = expected_names[_id][1]
+        if _id != renamed_id and s.fname and renamed_id:
+            if o.debug >= 1: print "[SIGNAL-RENAME]: signal: %s -> %s" % (_id, renamed_id)
+            s.renamed_id = renamed_id
+    header_signals = dict(expected_headers)
+    sampler_headers = [(name, header_signals[name]) for name in sampler_headers]
+    sampler_signals = dict([(pair[1], idx) for idx, pair in enumerate(sampler_headers)])
+    return [(sampler_signals[s] if sampler_signals.has_key(s) else None) for s in plot.spc_loader.signals]
+
+def sp_acc(self, value, time=None, interval=(None, None), default=0):
+    num_t = self._context.clock.num_t
+    if time == None:
+        time = num_t # default is to use relative time
+    if 0 < num_t[0] and (interval[0] == None or interval[0] <= time[0]) and (interval[1] == None or time[0] <= interval[1]):
+        return self[-1] + value
+    else:
+        return default
+
+class SignalProcessor:
+    def __init__(self, plot):
+        self.plot = plot
+        self.depth = 0
+        self.signals = plot.spc_loader.signals
+        self.clocks = plot.spc_loader.clocks.values()
+        self.time_any = plot.spc_loader.clocks['time_any']
+        self.curve_shifts = plot.curve_shifts()
+        self.relative = not self.plot.options.absolute
+        self.T0 = None
+        self.debug_switch_idx = 0
+    def dynamic_lines_for_feedgnuplot(self):
+        plot = self.plot
+        o = plot.options
+        sample_columns = plot.sample_columns()
+        plot_delay = 0
+        time_columns, sample_timeidx = None, None
+        for (header, sample) in parsed_samples(plot):
+            if header:
+                sample_columns = validate_header(plot, sample)
+                if o.debug >= 1: print "[SAMPLE-COLUMNS]: %r" % sample_columns
+                continue
+            if time_columns == None:
+                time_columns, sample_timeidx = plot.sample_time_columns(sample_columns)
+            T = None
+            for column_idx, s in time_columns:
+                if s.id != 'time_any':
+                    res = s._clock_maybe_push(self.T0, sample[column_idx])
+                    if T == None and res != None:
+                        T = res
+                        if self.T0 == None:
+                            self.T0 = T
+            self.time_any._clock_maybe_push(self.T0, T)
+            for s in self.signals:
+                if not s._signal_is_clock() and s._signal_clock._clock_is_defined():
+                    s._signal_push(delayed)
+            if o.debug >= 6: self.print_state("after orig")
+            for src, s in itertools.izip(sample_columns, self.signals):
+                if not s._signal_is_clock() and s._signal_clock._clock_is_defined():
+                    # @todo value_raw is available only at signal_expr_center=0
+                    value_raw = sample[src] if src != None else None
+                    success = True
+                    while success and s._signal_expr_center >= 0:
+                        success, to_yield = self.calc_signal(s, value_raw=value_raw)
+                        if to_yield:
+                            yield to_yield
+            if o.debug >= 5: self.print_state("after expr")
+        # catch-up all delayed signals
+        while True:
+            calc_signal_counter = 0
+            for s in self.signals:
+                if not s._signal_is_clock() and s._signal_expr_center >= 0:
+                    success, to_yield = self.calc_signal(s, delay_future=False)
+                    calc_signal_counter += 1
+            if calc_signal_counter == 0:
+                break
+        # reports gaps at the end
+        for c in self.clocks:
+            if c != self.time_any:
+                c._clock_maybe_report_gap(self.time_any, flush=True)
+    def calc_signal(self, s, value_raw=None, delay_future=True):
+        o = self.plot.options
+        if o.debug >= 2: s.profile.enable()
+        to_yield = None
+        expr_T, value = None, None
+        success = True
+        s._signal_setup_expr_center()
+        expr_T = s._signal_clock[0]
+        for c in self.clocks:
+            c._clock_find_expr_center(expr_T)
+        try:
+            value = s._signal_eval_expr_and_set(value_raw, delay_future=delay_future)
+            success = value != delayed
+        except Exception, e:
+            print >>sys.stderr, "*** signal expression error time=%r signal.id=%r value=%r nosig=%r" % (expr_T, s.id, value_raw, s.nosig)
+            self.print_state("exception in expr", file=sys.stderr)
+            raise
+        if success:
+            s._signal_expr_center -= 1
+        if o.debug >= 4: print "[EXPR]: signal=%s clock=%s expr_T=%r value_raw=%r value=%r" % (s.id, s._signal_clock.id, expr_T, value_raw, value)
+        if s.id == '__plot__' and success:
+            t_gnuplot = expr_T - (self.T0 if self.relative else 0)
+            for c in self.clocks:
+                if c != self.time_any:
+                    c._clock_maybe_report_gap(self.time_any)
+            if (o.xmin == None or o.xmin <= t_gnuplot) and (o.xmax == None or t_gnuplot <= o.xmax):
+                valuepacks = zip(value, self.curve_shifts)
+                if o.debug >= 4: print "[PLOT]: valuepacks=%r" % (valuepacks,)
+                to_yield = (t_gnuplot, valuepacks)
+            debug_switch_idx_new = bisect.bisect_right(o.debug_switch, (expr_T,[]))
+            if self.debug_switch_idx < debug_switch_idx_new:
+                self.debug_switch_idx = debug_switch_idx_new
+                if debug_switch_idx_new <= len(o.debug_switch):
+                    if o.debug >= 0: print "[DEBUG-SWITCH]: switching debug level after T=%r %d -> %d" % (t_gnuplot, o.debug, o.debug_switch[self.debug_switch_idx-1][1])
+                    o.debug = o.debug_switch[self.debug_switch_idx-1][1]
+        if o.debug >= 2: s.profile.disable()
+        return success, to_yield
+    def print_state(self, prefix, file=sys.stdout):
+        pp = pprint.PrettyPrinter(width=1024)
+        print >>file, "[SIGNAL-STATES]: --- BEGIN %s" % prefix
+        print >>file, "[SIGNAL-STATES]:     T0 = %r" % self.T0
+        for c in self.clocks:
+            print >>file, "[CLOCK-STATES]:      %s    = %s" % (c.id, c._signal_format())
+            print >>file, "[CLOCK-STATES]:      %s.t  = %s" % (c.id, c.t._signal_format())
+            print >>file, "[CLOCK-STATES]:      %s.dt = %s" % (c.id, c.dt._signal_format())
+        for s in self.signals:
+            if not s._signal_is_clock():
+                print >>file, "[SIGNAL-STATES]:     %s = %s" % (s.id, s._signal_format())
+        print >>file, "[SIGNAL-STATES]: --- END"
+
+def get_signal_name(signal):
+    if signal.name != None:
+        return signal.name
+    return signal.renamed_id or signal.id
+
+def str_to_gnuplot(s):
+    return '"%s"' % s.encode("string_escape").replace('"', r'\"')
+
+def feedgnuplot_format_value(v, use_float, shift):
+    if v == None:
+        return FEEDGNUPLOT_DISCONTINUITY_VALUE
+    elif v == interpolate:
+        return FEEDGNUPLOT_INTERPOLATE_VALUE
+    elif use_float or type(v) == float:
+        return str(float(v) + shift)
+    else:
+        return str_to_gnuplot(str(v))
+
+def feedgnuplot_format_valuepack(valuepack):
+    values, shift = valuepack
+    if len(values) == 1:
+        v = values[0]
+        s = feedgnuplot_format_value(values[0], True, shift)
+        if v in [None, interpolate]:
+            return "%s %s" % (s, s)
+        else:
+            return "%s 0" % (s,)
+    else:
+        return "%s %s" % (feedgnuplot_format_value(values[0], True, shift),
+                          feedgnuplot_format_value(values[1], False, shift))
+
+def feedgnuplot_format_line(t, output_sample):
+    return "%s;%s" % (t, ";".join([feedgnuplot_format_valuepack(p) for p in output_sample]))
+
+def feedgnuplot_command_line(plot):
+    o = plot.options
+    signals = [s for s in plot.spc_loader.signals if s.visible]
+    y2 = ','.join([str(i) for i, s in enumerate(signals) if s.y == 2])
+    legend = [["--legend", str(i), pipes.quote(n)] for i, n in [(i, get_signal_name(s)) for i, s in enumerate(signals)] if n.strip() != ""]
+    styles = [["--curvestyle", str(i), pipes.quote(s.style)] for i, s in enumerate(signals) if s.style]
+    args = ([o.feedgnuplot]
+            + (['--discontinuity', FEEDGNUPLOT_DISCONTINUITY_VALUE])
+            + (['--interpolate=%s' % FEEDGNUPLOT_INTERPOLATE_VALUE])
+            + (['--geometry', o.geometry] if o.geometry else [])
+            + (['--stream', str(o.stream), '--xlen', str(o.xlen)] if plot.is_streaming() else [])
+            + (['--domain', '--extraValuesPerPoint=1', '--line'])
+            + (['--y2', y2] if len(y2) > 0 else [])
+            + reduce(operator.add, legend, [])
+            + reduce(operator.add, styles, [])
+            + ([o.extra_feedgnuplot]) + ([o.extra2_feedgnuplot])
+            + (['--terminal', plot.terminal()] if o.terminal and not o.hardcopy else [])
+            + (['--hardcopy', o.hardcopy] if o.hardcopy else [])
+            + (['--dump'] if o.dump else [])
+            )
+    return ' '.join(args)
+
+class FeedgnuplotWriter:
+    def __init__(self, plot):
+        self.plot = plot
+        self.proc = None
+        self.pipe = None
+    def write(self, t, valuepacks, feedgnuplot_formatted_line=None):
+        if not self.proc:
+            self.start_feedgnuplot()
+        line = feedgnuplot_formatted_line or feedgnuplot_format_line(t, valuepacks)
+        if self.plot.options.debug >= 4: print "[>>FEEDGNUPLOT]: %s" % (line)
+        print >>self.pipe, line
+        self.pipe.flush()
+    def __enter__(self):
+        return self
+    def start_feedgnuplot(self):
+        o = self.plot.options
+        cmd = feedgnuplot_command_line(self.plot)
+        if o.debug >= 1: print "[FEEDGNUPLOT]: %s" % (cmd)
+        self.proc = subprocess.Popen(cmd,
+                                     stdin=subprocess.PIPE,
+                                     stderr=subprocess.PIPE,
+                                     shell=True,
+                                     close_fds=True,
+                                     bufsize=0)
+        self.pipe = self.proc.stdin
+        GnuplotOutputFilter(self.proc.stderr, sys.stdout).start()
+    def __exit__(self, type_, value, traceback):
+        if self.pipe: self.pipe.close()
+        if self.proc:
+            try:
+                self.proc.wait()
+            except KeyboardInterrupt:
+                self.proc.kill()
+        self.proc = None
+        self.pipe = None
+    def interrupt(self):
+        if self.pipe: self.pipe.close()
+        if self.proc: self.proc.kill()
+        self.proc = None
+        self.pipe = None
+
+def csv_format_value(v, use_float):
+    if v == None or v == interpolate:
+        return ""
+    elif use_float:
+        return str(v)
+    else:
+        # @todo escape some characters
+        return str(v)
+
+def csv_format_valuepack(valuepack):
+    values, _ = valuepack
+    if len(values) == 1:
+        return csv_format_value(values[0], True)
+    else:
+        return "%s;%s" % (csv_format_value(values[0], True), csv_format_value(values[1], False))
+
+def csv_format_line(t, output_sample):
+    return "%s;%s" % (t, ";".join([csv_format_valuepack(p) for p in output_sample]))
+
+class CsvWriter:
+    def __init__(self, plot):
+        self.plot = plot
+        self.file = None
+    def write(self, t, valuepacks, feedgnuplot_formatted_line=None):
+        if not self.file:
+            csv = self.plot.options.csv
+            self.file = sys.stdout if csv == "-" else file(csv, 'w')
+            visible_signals = [s for s in self.plot.spc_loader.signals if s.visible]
+            print >>self.file, "t;%s" % ";".join([csv_format_value(s.id, False) for s in visible_signals])
+            print >>self.file, "t;%s" % ";".join([csv_format_value(s.name, False) or "" for s in visible_signals])
+        line = csv_format_line(t, valuepacks)
+        if self.plot.options.debug >= 4: print "[>>CSV]: %s" % (line)
+        print >>self.file, line
+        self.file.flush()
+    def __enter__(self):
+        return self
+    def __exit__(self, type_, value, traceback):
+        self.interrupt()
+    def interrupt(self):
+        if self.file:
+            if self.file != sys.stdout:
+                self.file.close()
+            self.file = None
+
+class Waiter:
+    def __init__(self, plot, target0):
+        self.need_waiter = plot.needs_waiter()
+        self.acceleration = plot.options.acceleration
+        if self.need_waiter:
+            self.target0 = target0
+            self.host0 = time.time()
+    def wait(self, target):
+        if self.need_waiter:
+            delay = self.acceleration * (target - self.target0) - (time.time() - self.host0)
+            if delay > 0:
+                time.sleep(delay)
+
+#
+# spc-module load sequence:
+# BEGIN RECURSION
+# 1. Create module
+# 2. Create signals (no eval formulas) (append to global list of signals), yet visible in it's own module
+# 3. Eval module text - this may create more signals, substitute texts, load other spc-modules, run adb
+# END RECURSION
+# 4. Eval formulas
+# 5. Now global list of signals can be used to create .ini and start sampler
+#
+
+class Plot:
+    def __init__(self, options, spc_loader=None):
+        self.options = options
+        self.spc_loader = spc_loader
+    def compile(self):
+        for s in self.spc_loader.signals:
+            s._signal_compile()
+    def main(self):
+        self.compile()
+        with self.output_writer() as w:
+            try:
+                waiter = None
+                backup = self.open_for_write_data_feedgnuplot()
+                if backup:
+                    backup.write("#")
+                    backup.write("# " + feedgnuplot_command_line(self))
+                    backup.write("#")
+                sp = SignalProcessor(self)
+                #pr = cProfile.Profile()
+                #pr.enable()
+                for (time_, output_sample) in sp.dynamic_lines_for_feedgnuplot():
+                    if waiter:
+                        waiter.wait(time_)
+                    else:
+                        waiter = Waiter(self, time_)
+                    feedgnuplot_formatted_line = None
+                    if backup:
+                        feedgnuplot_formatted_line = feedgnuplot_format_line(time_, output_sample)
+                        backup.write(feedgnuplot_formatted_line)
+                    w.write(time_, output_sample, feedgnuplot_formatted_line=feedgnuplot_formatted_line)
+                if self.options.debug >= 2:
+                    for s in self.spc_loader.signals:
+                        s.profile_prepare()
+                    signal_stats = [(s.profile_time, s) for s in self.spc_loader.signals]
+                    signal_stats.sort()
+                    for _, s in signal_stats:
+                        s.profile_print()
+                #pr.disable()
+                #print "yo:profile **** main"
+                #s = StringIO.StringIO()
+                #sortby = 'cumulative'
+                #ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+                #ps.print_stats()
+                #print s.getvalue()
+            except KeyboardInterrupt:
+                w.interrupt()
+    def output_writer(self):
+        return CsvWriter(self) if self.options.csv else FeedgnuplotWriter(self)
+    def is_streaming(self):
+        return not self.recorded_input() or self.options.acceleration > 0
+    def needs_waiter(self):
+        return self.recorded_input() and self.options.acceleration > 0
+    def recorded_input(self):
+        return self.options.read_data_sampler
+    def curve_shifts(self):
+        o = self.options
+        signals = self.spc_loader.signals
+        curve_shifts = []
+        axes_shifts = [0.0, 0.0] # for y and y2
+        for s in signals:
+            if s.visible:
+                curve_shifts.append(axes_shifts[s.y - 1])
+                axes_shifts[s.y - 1] += (o.y_shift if s.y == 1 else o.y2_shift)
+        if o.debug >= 1: print "[CURVE-SHIFTS]: %r" % curve_shifts
+        return curve_shifts
+    def sample_columns(self):
+        o = self.options
+        signals = self.spc_loader.signals
+        sample_columns = []
+        column = 2
+        for s in signals:
+            if s.expectable:
+                sample_columns.append(column)
+                column += 1
+            else:
+                sample_columns.append(None)
+        if o.debug >= 1: print "[SAMPLE-COLUMNS]: %r" % sample_columns
+        return sample_columns
+    def sample_time_columns(self, sample_columns):
+        o = self.options
+        signals = self.spc_loader.signals
+        sample2column = dict([(s.id, (c, s)) for s, c in itertools.izip(signals, sample_columns)])
+        time_column_names = list(set(['time_any']+[s.time for s in signals])) # force 'time_any' to be present
+        time_columns = [sample2column[n] for n in time_column_names if sample2column.has_key(n) and sample2column[n][1].expectable]
+        timename2idx = dict([(n, i) for i, n in enumerate(time_column_names)])
+        sample_timeidx = [timename2idx[s.time] for s in signals]
+        if o.debug >= 1: print "[SAMPLE-TIMEIDX]: %r" % sample_timeidx
+        if o.debug >= 1: print "[TIME-COLUMNS]: %r" % [(c, s.id if s != None else None) for c, s in time_columns]
+        return time_columns, sample_timeidx
+    def open_for_write_data_feedgnuplot(self):
+        if self.options.write_data_feedgnuplot:
+            return FileWriter(self.options.write_data_feedgnuplot)
+        else:
+            return None
+    def open_for_write_data_sampler(self):
+        if self.options.write_data_sampler:
+            return FileWriter(self.options.write_data_sampler)
+        else:
+            return None
+    def lines_from_sampler(self):
+        if self.options.read_data_sampler:
+            return RecordedLinesFromSampler(self)
+        else:
+            return DynamicLinesFromSampler(self)
+    def terminal(self):
+        if self.options.terminal == "auto":
+            return "x11" if self.is_streaming() else "wxt"
+        else:
+            return self.options.terminal
+
+def dict2obj(x):
+    if type(x) == types.DictType:
+        o = Object()
+        for k in x.keys():
+            setattr(o, k, x[k])
+        return o
+    elif type(x) == types.ListType:
+        return [dict2obj(i) for i in x]
+    else:
+        return x
+
+def obj2dict(x):
+    if type(x) == types.InstanceType or isinstance(x, Object):
+        d = {}
+        for k in dir(x):
+            if k[:1] != "_":
+                d[k] = obj2dict(getattr(x, k))
+        return d
+    elif type(x) == types.ListType:
+        return [obj2dict(i) for i in x]
+    else:
+        return x
+
+def read_global_config():
+    for filename in [os.path.expanduser("~/.samplerrc"), "/etc/samplerrc", "/opt/somc-sampler/share/etc/samplerrc"]:
+        if os.path.isfile(filename):
+            try:
+                result = eval(file(filename).read())
+                #if o.debug >= 1: print "[CONFIG]: from file %s: %s" % (filename, result)
+                return result
+            except:
+                print >>sys.stderr, "*** error reading configuration file %s" % (filename,)
+                print >>sys.stderr, traceback.format_exc()
+                sys.exit(1)
+    return {}
+
+def path_prepend(xs):
+    for d in list(reversed(xs)):
+        d = os.path.expanduser(d)
+        if os.path.isdir(d):
+            os.environ['PATH'] = d + os.pathsep + os.environ['PATH']
+
+class SpcModule:
+    def __init__(self):
+        self.__module__ = None
+        self.__children__ = None
+        self.__options__ = None
+        self.__loader__ = None
+    def on_init(self):
+        pass
+    def on_parser(self, parser):
+        pass
+    def on_options_preprocess(self, options):
+        pass
+    def on_read_context(self, options):
+        pass
+    def on_context(self, options):
+        pass
+    def on_options(self, options):
+        pass
+    def get_children(self):
+        return self.__children__
+    def find_signal(self, parent, path):
+        i, s = ([(i, s) for i, s in enumerate(parent['children'] if parent else self.__children__) if s['id'] == path[0]] + [None, None])[0]
+        if len(path) == 1:
+            return parent, i, s
+        else:
+            return self.find_signal(s['children'], path[1:])
+    def iterate_signals(self, parent, parents=[], indices=[]):
+        if parent:
+            parents = parents + [parent]
+        for i, s in enumerate(parent['children'] if parent else self.__children__):
+            indices_child = indices + [i]
+            yield parents, indices_child, s
+            for x1, x2, x3 in self.iterate_signals(s, parents=parents, indices=indices_child):
+                yield x1, x2, x3
+    def mark_signal_as_template(self, parent, path):
+        _, _, s = self.find_signal(parent, path)
+        if s:
+            s['template'] = True
+        else:
+            raise Exception("cannot find subsignal from %r at path %r" % (parent, path))
+    def mark_signal_override_as_applied(self, i):
+        self.__loader__.mark_signal_override_as_applied(i)
+    def clone_signal(self, s, d):
+        result = self.__clone_signal__impl__(s, d)
+        result['template'] = False
+        return result
+    def __clone_signal__impl__(self, s, d):
+        t = type(s)
+        if t == types.DictType:
+            return dict([(self.__clone_signal__impl__(k, d), self.__clone_signal__impl__(v, d)) for k, v in s.items()])
+        elif t == types.ListType:
+            return [self.__clone_signal__impl__(i, d) for i in s]
+        elif t == types.StringType:
+            return s % d
+        else:
+            return s
+    def log(self, loglevel, tag, s):
+        if not self.__options__ or self.__options__.debug >= loglevel:
+            print "[%s]: %s" % (tag, s)
+    def shell(self, args, **kwargs):
+        return self.__loader__.shell(args, **kwargs)
+    def get_context(self, key):
+        return self.__loader__.get_context(key)
+    def set_context(self, key, value):
+        self.__loader__.set_context(key, value)
+
+class SpcLoader:
+    def __init__(self, options):
+        self.options = options
+        self.context = None
+        self.signal_context = SignalContext()
+        self.module = imp.new_module("sampler_plot")
+        self.module.import_spc = self.import_spc
+        self.module.register_module = self.register_module
+        self.module.SpcModule = SpcModule
+        sys.modules[self.module.__name__] = self.module
+        self.adaptor_signal = sampler_data_spc.build_adaptor_signal(None, None)
+        self.adaptor_common = sampler_data_spc.build_adaptor_common(None, None)
+        self.signals = []
+        self.spc_modules = []
+        self.clocks = None
+        self.module_main = None
+        self.signal_overrides_applications = None
+    def register_module(self, spc_module):
+        self.registered_spc_module = spc_module
+    def import_main_spc(self, filename):
+        self.module_main = self.import_spc(filename).__module__
+    def import_spc(self, filename, prepend=False):
+        module = imp.new_module(os.path.basename(os.path.splitext(filename)[0]))
+        sys.modules[module.__name__] = module
+        data_common, src_module = None, None
+        try:
+            data_common, src_module = sampler_data_spc.load(self.adaptor_common, self.adaptor_signal, filename)
+            # @todo time signals should be added once, not per module
+            time_signal_template = {'expectable': True,
+                                    'exportable': False,
+                                    'id': None,
+                                    'nosig': 'NO_SIG',
+                                    'nuce': 3,
+                                    'subsignal': 0,
+                                    'visible': False}
+            time_signals_raw = []
+            time_signals_raw.append(dict(time_signal_template, id='time_any', expectable=False))
+            if data_common['time_columns']:
+                time_signals_raw.append(dict(time_signal_template, id='Time-now'))
+                time_signals_raw.append(dict(time_signal_template, id='TSince-last'))
+            time_signals = []
+            for data_signal_raw in time_signals_raw:
+                data_signal = {}
+                self.adaptor_signal.load(data_signal_raw, data_signal)
+                time_signals.append(data_signal)
+            data_common['signals'][:0] = time_signals
+        except:
+            print >>sys.stderr, "*** error parsing config file %s" % filename
+            print >>sys.stderr, traceback.format_exc()
+            sys.exit(1)
+        data_signals = data_common['signals']
+        module.math, module.abs = math, abs
+        module.delayed, module.interpolate = delayed, interpolate
+        module.sp_acc = sp_acc
+        module.common = data_common
+        path = []
+        children = []
+        for s in data_signals:
+            s['template'] = False
+            s['children'] = []
+            del path[s['subsignal'] or 0:]
+            if len(path) > 0:
+                path[-1]['children'].append(s)
+            else:
+                children.append(s)
+            path.append(s)
+        self.registered_spc_module = None
+        try:
+            code_module = compile(src_module, filename, 'exec')
+            exec code_module in module.__dict__
+        except:
+            print >>sys.stderr, "*** error loading module portion of config file %s" % filename
+            print >>sys.stderr, traceback.format_exc()
+            sys.exit(1)
+        spc_module = self.registered_spc_module or SpcModule()
+        self.registered_spc_module = None
+        spc_module.__module__ = module
+        spc_module.__children__ = children
+        spc_module.__options__ = self.options
+        spc_module.__loader__ = self
+        if prepend:
+            self.spc_modules.insert(0, spc_module)
+        else:
+            self.spc_modules.append(spc_module)
+        spc_module.on_init()
+        return spc_module
+    def override_options_defaults(self, options):
+        data_common = self.module_main.common
+        for k in data_common.keys():
+            if k != 'signals':
+                setattr(options, k, dict2obj(data_common[k]))
+    def set_parser(self, parser):
+        for m in self.spc_modules:
+            m.on_parser(parser)
+    def apply_signal_overrides(self):
+        def iterate_signals(signals):
+            for s in signals:
+                yield s
+                for ss in iterate_signals(s['children']):
+                    yield ss
+        for m in self.spc_modules:
+            for s in iterate_signals(m.__children__):
+                pass
+        signals = reduce(operator.add,
+                         [list(iterate_signals(m.__children__)) for m in self.spc_modules],
+                         [])
+        for i, (signal_id, key, value) in enumerate(self.options.signal_overrides):
+            if self.signal_overrides_applications[i] == 0: # en override should be used one - before cloning or after, but not both
+                for s in signals:
+                    if s['id'] == signal_id:
+                        if self.options.debug >= 1: print "[SIGNAL-OVERRIDE]: %s[%s] = %s" % (signal_id, key, value)
+                        s[key] = value if key in ['expr', 'scale'] else eval(value)
+                        self.signal_overrides_applications[i] += 1
+    def set_real_options(self, options):
+        self.options = options
+        # print signal tree
+        if options.list_signal_tree_orig:
+            self.print_signal_tree()
+            sys.exit(0)
+        self.signal_overrides_applications = [0] * len(options.signal_overrides)
+        # "on_options_preprocess()" for all modules
+        for m in self.spc_modules:
+            m.on_options_preprocess(options)
+        self.apply_signal_overrides()
+        for m in self.spc_modules:
+            m.__options__ = options
+        # handle context
+        if self.load_context():
+            self.options.context = False
+            self.options.write_context = None
+            for m in self.spc_modules:
+                m.on_read_context(options)
+        elif self.options.write_context or self.options.context:
+            for m in self.spc_modules:
+                m.on_context(options)
+            self.save_context()
+        self.context = None
+        # "on_options()" for all modules
+        for m in self.spc_modules:
+            m.on_options(options)
+        self.apply_signal_overrides()
+        # validate signal overrides
+        for i, (signal_id, key, value) in enumerate(options.signal_overrides):
+            if self.signal_overrides_applications[i] == 0:
+                raise Exception("cannot find signal with id %r" % signal_id)
+            elif self.signal_overrides_applications[i] > 1:
+                raise Exception("found more than one signal with id %r" % signal_id)
+        self.signal_overrides_applications = None
+        self.module.options = options
+        # apply visibility options
+        visibility_overrides = dict([(n, (False, 0)) for n in options.visible_hide] + [(n, (True, 0)) for n in options.visible_show])
+        for s in self.iterate_nontemplate_signals():
+            s_id = s['id']
+            if visibility_overrides.has_key(s_id):
+                value, count = visibility_overrides[s_id]
+                if count == 0:
+                    s['visible'] = value
+                    visibility_overrides[s_id] = (value, count + 1)
+                else:
+                    raise Exception("rejected visibility override: more than one signal with id %r" % s_id)
+            elif options.visible_hide_all:
+                s['visible'] = False
+        for s_id, (_, count) in visibility_overrides.items():
+            if count == 0:
+                raise Exception("failed visibility override: cannot find signal with id %r" % s_id)
+        # print signal tree
+        if options.list_signal_tree:
+            self.print_signal_tree()
+            sys.exit(0)
+        # create "Signal()" and "Clock()" objects for every module
+        nontemplate_signals = list(self.iterate_nontemplate_signals())
+        clock_names = set(['time_any']+[s['time'] for s in nontemplate_signals])
+        plot_signal_template = {'expectable': False,
+                                'exportable': False,
+                                'id': None,
+                                'nosig': 'NO_SIG',
+                                'subsignal': 0,
+                                'visible': False}
+        # common plot signal
+        plot_expr = "lambda x: __plot__._signal_plot_expr_multi(x, [%s])" % ", ".join(["__plot__"+s['id'] for s in nontemplate_signals if s['visible']])
+        if self.options.debug >= 1: print "[ADD-SIGNAL-PLOT]: adding __plot__ with expr: %r" % (plot_expr,)
+        plot_signal = {}
+        self.adaptor_signal.load(dict(plot_signal_template,
+                                      id='__plot__',
+                                      expr=plot_expr,
+                                      time='time_any'), plot_signal)
+        # plot signal for every visible signal
+        plot_signals = []
+        for s in nontemplate_signals:
+            if s['visible']:
+                s_plot = {}
+                s_expr = "lambda x: %s._signal_plot_expr_single(x, (%s))" % (s['id'], s['scale'])
+                if self.options.debug >= 1: print "[ADD-SIGNAL-PLOT]: adding __plot__%s with expr: %r" % (s['id'], s_expr,)
+                self.adaptor_signal.load(dict(plot_signal_template,
+                                              id='__plot__%s' % (s['id'],),
+                                              expr=s_expr,
+                                              time=s['time'],
+                                              ), s_plot)
+                plot_signals.append(s_plot)
+        # now create all signals
+        self.signals = [(Clock if s['id'] in clock_names else Signal)(self.options, s) for s in nontemplate_signals + plot_signals + [plot_signal]]
+        for s in self.signals:
+            # @todo "m" is not initialized
+            s.module = m.__module__
+            m.__module__.__dict__[s.id] = s
+        # create clocks
+        self.clocks = dict([('time_any', Clock(self.options, {'id': 'time_any'}))]+[(s.id, s) for s in self.signals if type(s) == Clock])
+        for signal in self.signals:
+            if not signal._signal_is_clock():
+                signal._signal_set_clock(self.clocks[signal.time])
+        if self.options.debug >= 1: print "[CLOCKS]: created clocks for: %r" % (self.clocks.keys(),)
+        # list visible signals
+        if options.list_visible:
+            self.list_visible_signals()
+            sys.exit(0)
+    def iterate_nontemplate_signals(self):
+        for m in self.spc_modules:
+            for s in self.iterate_nontemplate_signals_impl(m.__children__):
+                yield s
+    def iterate_nontemplate_signals_impl(self, signals):
+        for s in signals:
+            if not s['template']:
+                yield s
+                for ss in self.iterate_nontemplate_signals_impl(s['children']):
+                    yield ss
+    def shell(self, args, **kwargs):
+        if not ((self.options.write_context or self.options.context) and self.context != None):
+            raise Exception("\"shell()\" is used outside \"on_context()\"")
+        if self.options.read_data_sampler:
+            raise Exception("\"shell()\" is used together with \"--rd-sampler\", make sure you use \"--rd-context\" as well")
+        with LinesFromAdbShell(self.options) as lines_source:
+            return lines_source.findlines(args, **kwargs)
+    def get_context(self, key):
+        if not (self.options.read_context and self.context != None):
+            raise Exception("\"get_context()\" is used outside \"on_read_context()\"")
+        elif self.context.has_key(key):
+            return self.context[key]
+        else:
+            raise Exception("key %r not found in context file %r" % (key, self.options.read_context))
+    def set_context(self, key, value):
+        if not ((self.options.write_context or self.options.context) and self.context != None):
+            raise Exception("\"set_context()\" is used outside \"on_context()\"")
+        self.context[key] = value
+    def load_context(self):
+        o = self.options
+        if o.read_context:
+            try:
+                result = eval(file(o.read_context).read())
+                if o.debug >= 1: print "[READ-CONTEXT]: from file %s: %s" % (o.read_context, result)
+                self.context = result
+                return True
+            except:
+                print >>sys.stderr, "*** error reading context file %s" % (o.read_context,)
+                print >>sys.stderr, traceback.format_exc()
+                sys.exit(1)
+        else:
+            self.context = {}
+            return False
+    def save_context(self):
+        o = self.options
+        if o.write_context:
+            try:
+                if o.debug >= 1: print "[WRITE-CONTEXT]: to file %s: %s" % (o.write_context, self.context)
+                with file(o.write_context, 'w') as stream:
+                    print >>stream, "# -*- python -*-"
+                    print >>stream, ""
+                    pp = pprint.PrettyPrinter(stream=stream)
+                    pp.pprint(self.context)
+            except:
+                print >>sys.stderr, "*** error writing context file %s" % (o.write_context,)
+                print >>sys.stderr, traceback.format_exc()
+                sys.exit(1)
+    def mark_signal_override_as_applied(self, i):
+        if self.signal_overrides_applications == None:
+            raise Exception("\"mark_signal_override_as_applied()\" is used outside \"on_options_preprocess()\" or \"on_options()\"")
+        self.signal_overrides_applications[i] += 1
+    def list_visible_signals(self):
+        print "%-40s %s" % ("SIGNAL_ID", "Gnuplot LEGEND")
+        print "-" * 60
+        for s in self.signals:
+            if s.visible:
+                if s.name:
+                    print "%-40s %s" % (s.id, s.name)
+                else:
+                    print "%s" % (s.id,)
+    def print_signal_tree(self):
+        def print_signal_tree_impl(s, module_name, prefix="", template=False):
+            template = template or s['template']
+            attrs = ( ('t' if template else '-')
+                     +('x' if s['exportable'] else '-')
+                     +('i' if s['expectable'] else '-')
+                     +('v' if s['visible'] else '-'))
+            args = [module_name, attrs, prefix, s['id']]
+            name = s['name']
+            if name:
+                args.append(name)
+                id_width = max(1, 30 - len(prefix))
+                format = "%%-20s %%-4s %%s%%-%ds %%s" % id_width
+            else:
+                format = "%-20s %-4s %s%s"
+            print format % tuple(args)
+            for ss in s['children']:
+                print_signal_tree_impl(ss, module_name, prefix + "    ", template)
+        print "%-20s %-4s %-30s %s" % ("MODULE", "ATTR", "SIGNAL_ID", "Gnuplot LEGEND")
+        print "-" * 71
+        for m in self.spc_modules:
+            for s in m.__children__:
+                print_signal_tree_impl(s, m.__module__.__name__)
+
+def main(argv):
+    usage = "usage: %prog OPTIONS"
+    parser = optparse.OptionParser(usage)
+    parser.formatter._long_opt_fmt="%s %s"
+    parser.add_option("-c", "--config",
+                      type="string",
+                      dest="config",
+                      metavar="FILE",
+                      help="Read configuration from FILE (see example files for further information)")
+    parser.add_option("--signal",
+                      type="string",
+                      nargs=3, # signal_id, key, value
+                      action="append",
+                      default=[],
+                      dest="signal_overrides",
+                      metavar="SIGNAL_ID KEY VALUE",
+                      help="Override signal parameter (VALUE is a python expression, so a string should be written in quotes)")
+    parser.add_option("--ignore-header-mismatch",
+                      action="store_true",
+                      default=False,
+                      dest="ignore_header_mismatch",
+                      help="Ignore header mismatch between sampler output and expected columns (default is to report error and exit)")
+    parser.add_option("--setup",
+                      action="store_true",
+                      default=False,
+                      dest="do_not_sample",
+                      help="Do not start sampler. This is useful to setup a phone, which includes saving context, exporting&pushing .ini file and sampler binary")
+    parser.add_option("--do-not-push-ini",
+                      action="store_true",
+                      default=False,
+                      dest="do_not_push_ini",
+                      help="Do not export&push .ini file (default is to export and push)")
+    parser.add_option("--do-not-push",
+                      action="store_true",
+                      default=False,
+                      dest="do_not_push",
+                      help="Ignore push directives given provided by \"--push\" options (default is to push)")
+    parser.add_option("-d", "--debug",
+                      type="int",
+                      dest="debug",
+                      metavar="LEVEL",
+                      help="Set debug level between 0 (default, no debug output) and 3 (several lines per sample, very verbose)")
+    parser.add_option("-D", "--debug-switch",
+                      type="string",
+                      nargs=2,
+                      action="append",
+                      default=[],
+                      dest="debug_switch",
+                      metavar="PLOT_TIME LEVEL",
+                      help="Switch debug level after reaching PLOT_TIME to LEVEL. This option can be specified multiple times")
+    parser.add_option("--gap",
+                      type="float",
+                      default=1.0,
+                      dest="gap_threshold",
+                      metavar="INTERVAL",
+                      help="Set threshold INTERVAL in seconds for gap detection. Warning messages will be generated if input data for some data source will not be updated within a specified INTERVAL (default value is 1.0 sec)")
+    group = optparse.OptionGroup(parser, "Sampler Options")
+    group.add_option("-s", "--sigs_file",
+                     type="string",
+                     dest="sigs_file",
+                     metavar="FILE",
+                     help="Signals description file")
+    group.add_option("-p", "--period",
+                     type="int",
+                     dest="period",
+                     metavar="PTIME",
+                     default=0,
+                     help="Period-time in uS. -1 equals event-driven output. Default period-time is [100000] uS")
+    group.add_option("-e", "--extra",
+                     type="string",
+                     dest="extra",
+                     metavar="OPTIONS",
+                     help="Extra options to pass to \"sampler\"")
+    parser.add_option_group(group)
+    group = optparse.OptionGroup(parser, "Plotting")
+    group.add_option("--absolute",
+                     action="store_true",
+                     default=False,
+                     dest="absolute",
+                     help="Show absolute CPU time on X-axis (default is to show time relative to sampler start)")
+    group.add_option("--y-shift",
+                     type="float",
+                     dest="y_shift",
+                     metavar="NUMBER",
+                     default=0,
+                     help="Shift every subsequent curve along Y-coordinate by given number for all y-based signals (default is 0 which means no shifts)")
+    group.add_option("--xmin",
+                     type="float",
+                     dest="xmin",
+                     metavar="TIME",
+                     default=None,
+                     help="Limit plotting to use only samples marked not younger than TIME")
+    group.add_option("--xmax",
+                     type="float",
+                     dest="xmax",
+                     metavar="TIME",
+                     default=None,
+                     help="Limit plotting to use only samples marked not older than TIME")
+    group.add_option("--geometry",
+                     type="string",
+                     dest="geometry",
+                     metavar="GEOMETRY",
+                     help="Value for \"--geometry\" parameter for feedgnuplot")
+    group.add_option("--hardcopy",
+                     type="string",
+                     dest="hardcopy",
+                     metavar="FILE",
+                     help="Instruct gnuplot to save image to FILE (file extension must be one of: ps eps pdf svg png)")
+    group.add_option("--extra-feedgnuplot",
+                     type="string",
+                     dest="extra_feedgnuplot",
+                     metavar="OPTIONS",
+                     default="",
+                     help="Extra options to pass to \"feedgnuplot\", overrides \"extra_feedgnuplot\" in configuration file")
+    group.add_option("--extra2-feedgnuplot",
+                     type="string",
+                     dest="extra2_feedgnuplot",
+                     metavar="OPTIONS",
+                     default="",
+                     help="Extra options to pass to \"feedgnuplot\", does not override \"extra_feedgnuplot\" in configuration file")
+    group.add_option("-t", "--terminal",
+                     type="string",
+                     dest="terminal",
+                     metavar="TERMINAL",
+                     default="auto",
+                     help="Terminal to use by gnuplot (default is \"auto\", which means \"x11\" for streaming mode and \"wxt\" for non-streaming)")
+    group.add_option("--show",
+                     type="string",
+                     action="append",
+                     default=[],
+                     dest="visible_show",
+                     metavar="SIGNAL_ID",
+                     help="Make specified signal visible. This option can be specified multiple times")
+    group.add_option("--hide",
+                     type="string",
+                     action="append",
+                     default=[],
+                     dest="visible_hide",
+                     metavar="SIGNAL_ID",
+                     help="Make specified signal not visible. This option can be specified multiple times")
+    group.add_option("--hide-all",
+                     action="store_true",
+                     default=False,
+                     dest="visible_hide_all",
+                     help="Make all signals not visible. This options should normally be followed by one or several \"--show\" options to enable just few specific signals")
+    parser.add_option_group(group)
+    group = optparse.OptionGroup(parser, "Real-Time Streaming Data")
+    group.add_option("--stream",
+                     type="float",
+                     dest="stream",
+                     metavar="NUMBER",
+                     default=0.1,
+                     help="Update interval for \"feedgnuplot\" (default is 0.1)")
+    group.add_option("--xlen",
+                     type="float",
+                     dest="xlen",
+                     metavar="NUMBER",
+                     default=20,
+                     help="Domain range when feedgnuplot is used with --stream (default is 20)")
+    group.add_option("-a", "--acceleration",
+                     type="float",
+                     dest="acceleration",
+                     metavar="NUMBER",
+                     default=0,
+                     help="Multiplication factor for sample delays when used with --rd-* options (default is 0 which means no delays)")
+    parser.add_option_group(group)
+    group = optparse.OptionGroup(parser, "Recording and Playback")
+    group.add_option("--rd-sampler",
+                     type="string",
+                     dest="read_data_sampler",
+                     metavar="FILE",
+                     help="Read data from FILE as if this is output from \"sampler\"")
+    group.add_option("--wr-sampler",
+                     type="string",
+                     dest="write_data_sampler",
+                     metavar="FILE",
+                     help="Save \"sampler\" output to FILE for later use with --rd-sampler")
+    group.add_option("--context",
+                     action="store_true",
+                     default=False,
+                     dest="context",
+                     help="Use dynamic context without saving it. This is equivalent to --wr-context=/dev/null")
+    group.add_option("--rd-context",
+                     type="string",
+                     dest="read_context",
+                     metavar="FILE",
+                     help="Read context from a given FILE")
+    group.add_option("--wr-context",
+                     type="string",
+                     dest="write_context",
+                     metavar="FILE",
+                     help="Save \"context\" to a specified FILE for later use with --rd-context")
+    group.add_option("--wr-feedgnuplot",
+                     type="string",
+                     dest="write_data_feedgnuplot",
+                     metavar="FILE",
+                     help="Save \"feedgnuplot\" input to FILE")
+    group.add_option("--csv",
+                     type="string",
+                     dest="csv",
+                     metavar="FILE",
+                     help="Save output in CSV format")
+    group.add_option("--dump",
+                     action="store_true",
+                     default=False,
+                     dest="dump",
+                     help="Dump \"feedgnuplot\" output to stdout instead of feeding it to \"gnuplot\"")
+    parser.add_option_group(group)
+    group = optparse.OptionGroup(parser, "Paths to Binaries, How to Invoke Subprocesses")
+    group.add_option("--host",
+                     action="store_true",
+                     default=False,
+                     dest="host",
+                     help="Run sampler on host (default is to run via \"adb -d shell\")")
+    group.add_option("--adb",
+                     type="string",
+                     dest="adb",
+                     metavar="ADB_BINARY",
+                     default="adb",
+                     help="Set path to \"adb\" binary (default is \"adb\")")
+    group.add_option("--sampler",
+                     type="string",
+                     dest="invoke_sampler",
+                     metavar="SAMPLER_INVOCATION",
+                     default=None,
+                     help="Specifies how to invoke sampler. Example usage is \"ssu root /data/local/sampler\"")
+    group.add_option("--android-sampler",
+                     type="string",
+                     dest="android_sampler",
+                     metavar="ANDROID_SAMPLER_BINARY",
+                     default="sampler",
+                     help="Set path to \"sampler\" binary to be used on android (default is \"sampler\")")
+    group.add_option("--host-sampler",
+                     type="string",
+                     dest="host_sampler",
+                     metavar="HOST_SAMPLER_BINARY",
+                     default="sampler",
+                     help="Set path to \"sampler\" binary to be used on host (default is \"sampler\")")
+    group.add_option("--push",
+                     type="string",
+                     nargs=2, # src dst
+                     action="append",
+                     default=[],
+                     dest="push",
+                     metavar="SRC DST",
+                     help="Specifies how to push android sampler binary from host to android. When running on \"--host\" or when \"--do-not-push-sampler\" is set \"--push-sampler\" is ignored.")
+    group.add_option("--sampler-no-args",
+                     action="store_true",
+                     default=False,
+                     dest="sampler_no_args",
+                     help="Forces \"sampler\" to be invoked without \"-s\", \"-p\" and \"--extra\". This is useful when \"sampler\" is run via netcat")
+    group.add_option("--feedgnuplot",
+                     type="string",
+                     dest="feedgnuplot",
+                     metavar="FEEDGNUPLOT_BINARY",
+                     default="feedgnuplot",
+                     help="Set path to \"feedgnuplot\" binary (default is \"feedgnuplot\")")
+    parser.add_option_group(group)
+    group = optparse.OptionGroup(parser, "Information")
+    group.add_option("--list-visible-signals",
+                     action="store_true",
+                     default=False,
+                     dest="list_visible",
+                     help="List visible signals and exit")
+    group.add_option("--list-signal-tree",
+                     action="store_true",
+                     default=False,
+                     dest="list_signal_tree",
+                     help="List signal tree after module hooks are applied")
+    group.add_option("--list-signal-tree-orig",
+                     action="store_true",
+                     default=False,
+                     dest="list_signal_tree_orig",
+                     help="List signal tree before module hooks are applied")
+    parser.add_option_group(group)
+    # preliminary options: --config and --debug
+    config_filenames = [y for x, y in itertools.izip(argv, argv[1:]) if x in ["-c", "--config"]]
+    options_debug = ([y for x, y in itertools.izip(argv, argv[1:]) if x in ["-d", "--debug"]]+[0])[0]
+    options = dict2obj({'debug': options_debug})
+    spc_loader = SpcLoader(options)
+    if len(config_filenames) > 0:
+        spc_loader.import_main_spc(config_filenames[0])
+    spc_loader.set_parser(parser)
+    default_values = parser.get_default_values()
+    for k, v in read_global_config().items():
+        if k == 'path_prepend':
+            path_prepend(v)
+        else:
+            setattr(default_values, k, v)
+    if len(config_filenames) > 0:
+        spc_loader.override_options_defaults(default_values)
+    options, args = parser.parse_args(values=default_values)
+    if len(args) > 0:
+        parser.error("invalid arguments")
+    if not options.config:
+        parser.error("mandatory \"-c FILE\" option is missing")
+    elif not (len(config_filenames) > 0 and config_filenames[0] == options.config):
+        parser.error("mandatory \"-c FILE\" option is specified ambiguously, try to cleanup and reorder command-line options")
+    try:
+        options.debug_switch = [(float(t), int(l)) for t, l in options.debug_switch]
+        options.debug_switch.sort()
+    except:
+        parser.error("invalid \"-D\" option")
+    spc_loader.set_real_options(options)
+    Plot(options, spc_loader).main()
+
+#
+# how to add current directory to python search path
+# sys.path[:0] = [os.getcwd()]
+#
+if __name__ == "__main__" and os.getenv("INSIDE_EMACS") == None:
+        main(sys.argv[1:])

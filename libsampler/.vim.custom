@@ -1,4 +1,9 @@
+"Put this is ~/.bash_profile to fix where kdbg X-window is put
+"export KDBG_GEOMETRY="-geometry 1105x1383-6--5"
 
-let $LIB_DYNAMIC = "y"
-let $LD_LIBRARY_PATH = "/home/mambrus/lib"
-nmap <silent> <leader>d :!kdbg ../sampler &<CR>
+"Or remove remark below to adjust per project
+"let KDBG_GEOMETRY="-geometry 1105x1383-6--5"
+
+"Measure the actual geometry on a placed X-window with the 'xwininfo'
+"command-line utility to tune the line above.
+nmap <silent> <leader>d :!cd ..; kdbg $KDBG_GEOMETRY $KDBG_SESSION $KDBG_BINARY &<CR>

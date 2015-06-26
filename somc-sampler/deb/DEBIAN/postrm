@@ -1,0 +1,7 @@
+#!/bin/sh
+#
+# This example is taken from /var/lib/dpkg/info/stopwatch.postinst
+#
+set -e
+if [ -x "`which update-menus 2>/dev/null`" ]; then update-menus ; fi
+

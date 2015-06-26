@@ -1,0 +1,25 @@
+To install
+==========
+
+cd <parent_dir_to_this_dir>
+s3.install_all.sh
+
+All scripts are now accessible via sc.*.sh commands
+
+How to use
+==========
+
+The following operates on indifidual files:
+-------------------------------------------
+sc.signal-edit.sh       Edits a specific signal (*.sig)
+sc.sample-edit.sh       Edits a specific sample (*.smpl)
+
+The following operates on directories:
+--------------------------------------
+sc.sigdef_pack.sh       Take a directory with *sig files and one *.smpl
+                        file and convert it into a sampler *.ini file.
+sc.sigdef_unpack.sh     Reverse the operation above. I.e. from a *.ini
+						file create directory with *.sig files (and possibly
+						one *.smpl file)
+
+

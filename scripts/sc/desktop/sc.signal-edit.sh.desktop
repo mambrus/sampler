@@ -1,0 +1,13 @@
+#!/usr/bin/env xdg-open
+
+[Desktop Entry]
+Version=1.0
+Type=Application
+Terminal=false
+Icon[en_US]=gnome-panel-launcher
+Exec=xterm -e sc.signal-edit.sh -f %U
+Name[en_US]=sc.signal-edit.sh
+Comment[en_US]=signal edit
+Name=sc.signal-edit.sh
+Comment=signal edit
+Icon=gnome-panel-launcher

@@ -1,0 +1,22 @@
+Building Installable Debian Packages
+====================================
+
+Before building make sure you have Android NDK installed and
+"ndk-build" in the PATH.
+
+$ debgen -v somc-sampler
+or if you do not have debgen in your PATH, it is in the mib-tools git:
+$ <PATH-TO-MIB-TOOLS-GIT>/debgen/debgen -v somc-sampler
+
+somc-sampler is a subdirectory containing scripts and configuration for creating the
+package.
+
+A successful build would generate a file like:
+somc-sampler_1.0.20130723.1+git20130723.7c3857bd_all.deb
+
+IMPORTANT NOTE:
+===============
+To ensure proper traceability the following things must be considered before building
+the final package to be distributed:
+- all changes must be committed and published (merged and uploaded)
+- the working directory from which the package is built must be clean

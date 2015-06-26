@@ -1,0 +1,303 @@
+Mon Dec 16 21:47:30 CET 2013
+=========1=========2=========3=========4=========5=========6=========7=========8
+The new -t dir for directory where to put named pipes. Presidency is as
+follows:
+
+* Option (flag)
+* Environment
+* Hard-coded build-default
+* Hard-coded build-default becomes what env-var was at the time of build.
+* Hard-coded source-default, which is "/tmp" as we know we can likely write
+  there.
+
+A sane example, showing how the new -t flag works and can be used. Note the
+differences passing it as a -e tuple and as either flag or environment. This
+makes a difference if samplers are chained and not on the same system. -e will
+carry it over as it doesn't rely on inherited environment.
+
+SAMPLER_TMPDIR=ignored sampler -E1 -s testrc/netcat.ini -T 10000 \
+	-p'/tmp:/media/tmp' \
+	-e'SAMPLER_TMPDIR=/data/local/tmp/sampler_pipes' \
+	-p'/data/local/tmp' \
+	-t /tmp/sampler_pipes \
+	-v
+
+mån 16 dec+ 2013 01.53.+28 CET
+=========1=========2=========3=========4=========5=========6=========7=========8
+Procsusbst
+----------
+To test environment and PATH parsing:
+
+sampler -E1 -s testrc/netcat.ini -v -T 10000 \
+	-p'/tmp:/media/tmp' \
+	-e"MUPP=kalle" \
+	-e'MIFFO=Mir,BACKUP=yes' \
+	-p'/data/local/tmp'
+
+Output should be:
+
+Module settins (sampler):
+:
+:
+  inherit_env: [1]
+  path[0]: "/tmp"
+  path[1]: "/media/tmp"
+  path[2]: "/data/local/tmp"
+  env[0]: "MUPP=kalle"
+  env[1]: "MIFFO=Mir"
+  env[2]: "BACKUP=yes"
+
+Note that the settings mean nothing for SAMPLER. They are meaningful only for
+the environment in which procsubs execute.
+
+Thu Nov  7 13:05:28 CET 2013
+=========1=========2=========3=========4=========5=========6=========7=========8
+Tested "values-as-strings" in periodic lock-step mode in a brutal case on host.
+
+On host and when writing output to file
+(3.9.0-030900-generic/SMP/x8/2.7GH) of process "firefox" (42 threads) there
+were no measurable impact on 100Hz and below.
+
+When running on 1KHz system was interfered with ~40%. In practice this
+technique will be used (if used) at rates around 1Hz or above. I.e. even on
+mobile device, there should be plenty of head-room.
+
+Sun Nov  3 16:00:48 CET 2013
+=========1=========2=========3=========4=========5=========6=========7=========8
+clocl_gettime(CLOCK_MONOTONIC) is NOT guaranteed to be equal to kernel-time
+with current implementation (commits leading to this SHA1:). The same is
+unfortunately true for CLOCK_MONOTONIC_RAW.
+
+How to proof:
+============
+
+Terminal 1:
+-----------
+sudo chmod a+w /dev/kmsg
+for (( ;1; )); do echo "Time-ping" > /dev/kmsg; sleep 30; done
+
+To avoid chmoding kmsg one can alternatively do the following:
+for (( ;1; )); do echo "Time-ping" | sudo tee /dev/kmsg; sleep 30; done
+
+Terminal 2:
+-----------
+date '+%s'; clear; sampler -s testrc/kmsg_chardev.ini -p-1 | \
+	awk -F";" '
+		/^[[:digit:]]+\.[[:digit:]]{6}/{
+			MONOTONIC=$1;
+			KERN=$5/1000000;
+			DIFF=MONOTONIC-KERN;
+			printf("%f;%f;%f\n",MONOTONIC,KERN,DIFF);fflush();
+		}' | tee /tmp/kern_time_stats.txt
+
+Observations on reference host:
+-------------------------------
+uname -a
+Linux hornet 3.5.0-36-generic #57-Ubuntu SMP Wed Jun 19 15:10:49 UTC 2013
+x86_64 x86_64 x86_64 GNU/Linux
+
+@Up-time(m)	CLOCK_MONOTONIC	Diff		Rel Error (ppm)
+==========	===============	==========	===============
+831			49755.929141	7.690693	154.568373
+1469		88083.344993	13.693057	155.455688
+2826		169581.674867	26.460549	156.034247
+33120		2248850.365587	351.682119	156.383068
+
+Above is i.e. measured after ~13hrs, 1 day, 2 days, 23 days. The relative
+error is ~constant (original data from KernelDrift.gnumeric). This means the
+clocks are in sync at boot (on this machine i.e.) and the complete
+difference is pure clock-drift. On mobile devices, offset may occur as well
+around suspend/resume. Drift is more difficult to compensate than offset
+however.
+
+Conclusion:
+-----------
+* Drift is high: 0.5s/h in the measurement above.
+* Post-processed Synchronization based on kernel-logs and only once is
+  naive and technically wrong as long as we're talking about 3 different
+  clocks each with potentially different drift and offset error towards each
+  other. If one is lucky, the clocks are close enough to each other at boot
+  and over short measurements, but there's absolutely no guarantee (POSIX
+  standard guarantees nothing regarding clock_gettime(CLOCK_MONOTONIC)).
+* Sampler must have either (or all):
+	- A mechanism to compensate kernel-time drift and offset.
+	- Assert that timebase in printk and clock_gettime(CLOCK_MONOTONIC) are
+	  the same.
+	- Change clock source to the same as printk. This would be the
+	  simplest way to solve the complete issue, but I'm not sure this
+	  option is available in user-land, per process and as non-root.
+* Kernel-time detection can't be done at each sample as without changing
+  clock_source, there are no API available than detection via kmsg. This
+  would consume far too much CPU-time. I.e. a drift calculating
+  thread/daemon is needed.
+* Current drift (slew) and offset compensation should be added to each
+  printout. That way, SAMPLER output will get very close to kernel-time
+  without constantly probing, enabling reliable post-process kernel-log data
+  and SAMPLER merging. Experimentation show that with syncronisatinon twice
+  per minute, a simple algorithm can get accuracy within 15mS from kernel
+  clock worst case. Most importantly:
+  	- This is without drift (i.e. "accumulative error")
+	- Without abrupt changes which would cause wreck havoc in the order for
+	  anything processing the output.
+
+Special considerations:
+-----------------------
+(Regarding occasion around suspend/resume/hibernation.)
+
+* What happens with either time. Is there a glitch?
+* Different kernels might handle things differently. Some apparently
+  manipulate kernel-time at resume which in my opinion is seriously wrong.
+  Even if kernel-time is drifting, which is more than likely, it's important
+  to chose one as the reference. Kernel-time is normally not adjusted even
+  if it's drifting, this is because keeping track of order is more important
+  than drift or clock accuracy in the kernel-world. This fact is important
+  to keep in mind and should give good precision for relative measurements
+  even if no clock is compensated.
+* Avoid compensate close to suspend/resume? How would SAMPLER know?
+* Note that technique based on writing to /dev/kmsg will not work as this is
+  normally root:root/0600. There exists alternative methods however.
+
+Sat Oct 12 12:41:01 CEST 2013
+=========1=========2=========3=========4=========5=========6=========7=========8
+Starting implementing feature "named pipes"
+
+To set environment up for test/debug/devlop, you need both hemul's and
+sampler's environment. Sourcing order becomes very important, or the errors
+you get will be confusing (LD_LIBRARY_PATH getting the wrong library, debug
+environment wrong e.t.a e.t.a.):
+
+cd sampler
+pushd ../hemul;source .env; popd
+source $(pwd)/.env
+
+NOTE: Both environments set up path to it's own src-root directory. Common
+practice, when built in source, is to place the final binary in src rootdir,
+which is also where respective .env reside. This becomes a confict and the
+second source must refer to a full path, or bash will first search in PATH,
+find the first one and source it instead. Sneaky...
+
+To see that both environments are indeed read and handled, output the
+following array:
+
+echo $BASH_SOURCE
+
+Emulate flow of something:
+ln -s $(pwd)/whatever/kmsg.txt emul /tmp/kmsg.txt
+hemul -i ./tmp/kmsg.txt -R'^<[0-9]>\[[[:space:]]*([[:digit:]]+\.[[:digit:]]{6})\].*' \
+	-EPo /tmp/kmsg_pipe
+
+Flow is now in pipe and extra echo to stdout also executed.
+
+Sat 25 maj+ 2013 20.14.+19 CEST
+Hints about developing signal-regex:s
+=====================================
+
+Use host-side tools that use POSIX extended regex flavour to filer out:
+* File
+* Which lines
+* Of these, which one (n'th)
+* The signal regex
+
+adb shell cat /proc/stat | \
+	grep -E '^cpu[0-9]' | \
+	sed -ne 2P | \
+	sed -E 's/^.* (.*) (.*) (.*) (.*) (.*) (.*) (.*) (.*) (.*) (.*)$/'\
+'\1 \2 \3 \4 \5 \6 \7 \8 \9 \10/'
+
+Fri May 24 17:06:11 CEST 2013
+Build/debug using NDK works fine
+================================
+
+To build:
+--------
+. .envx
+make android-clean
+make android
+push2target.sh
+
+To debug:
+---------
+1)
+for (( ;1; )); do rgdbserver.sh -s \
+	/data/local/tmp/sampler/startup.ini \
+	-p 100000; done
+
+2)
+Either
+a)
+Start 'gdb.tap.sh'
+
+b)
+kdbg libs/armeabi/sampler -r localhost:5039
+(preferably from vim, environment vars help control tcp_tap)
+
+c)
+'gdb_arm -x -gdbinit libs/armeabi/sampler'
+
+
+Running SAMPLER "as is" on competitor phones:
+
+adb shell /data/local/tmp/sampler/sampler \
+	-s /data/local/tmp/sampler/startup.ini -p 100000
+
+chmod instead of becomming root for local files
+===============================================
+sudo chmod a+r /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_cur_freq
+sudo chmod a+r /sys/devices/system/cpu/cpu1/cpufreq/cpuinfo_cur_freq
+
+Git kwirks
+==========
+Different versions of git handle links differently. To avoid known such
+changes:
+
+git checkout $(git status | grep typechange | cut -f2 -d":")
+
+Plotting temporal properties
+============================
+Produce a time distribution test (-R is with or without RT-threads).
+
+./sampler -s testrc/proc_x8.ini -p1000 -R | tee \
+    odata/buid1/new-03_prox_x8_1khz.txt
+
+You might omit tee in the pipe to less the buren for the host even more.
+
+Or plot directly:
+
+(On host)
+./sampler -s testrc/proc_x8.ini -p1000  -R | \
+	awk -F";" '
+		NR==2{TSTART=$1;M=$2}
+		NR>2{printf("%s %s %s\n",($1-TSTART),$2,M);N++;P+=$2;M=P/N}' | \
+		feedgnuplot --domain --line%--stream 0.5 --xlen=20
+
+(On Kalix)
+ adb shell "sampler -s /etc/sampler/thermal_kalix.ini -p5000" | \
+	tee /tmp/log | awk -F";" ' NR==2{TSTART=$1;M=$2} \
+		NR>2{printf("%s %s\n",$2,M);N++;P+=$2;M=P/N}' | \
+	feedgnuplot --stream 0.1 --histo 0,1 --curvestyleall \
+		'with boxes' --bin 0.0001 --xmin 0.0 --xmax 0.01 --ymax 1000
+
+Plotting histograms of periodicity live is a fun exersize to compare temporal
+properties running with or without real-time threads:
+
+./sampler -s testrc/proc_x8.ini -p1000 -R | \
+	awk -F";" ' NR==2{TSTART=$1;M=$2} \
+                NR>2{printf("%s %s\n",$2,M);N++;P+=$2;M=P/N}' | \
+    feedgnuplot --stream 0.1 --histo 0,1 --curvestyleall 'with boxes' \
+		--bin 0.00001 -xmin 0.0005 -xmax 0.0015
+
+Play around replacing "--histo 0,1" with "--histo 0", vary the value for "--bin"
+and especially compare with and without "-R"
+
+Especially with the -R flag, decreasing value for -p a factor %10 at a
+time, is an excellent exersize finding out where a systems limits are.
+
+Below a certain value, the histogram will start to get plotted radically to
+the right of the intended center. On ref host (3.5 GHz I7) this occures at
+about -p250 (4KHz sample-rate). Note that this will vary dependng on the
+ini-file used. Proc-filesystem is still very light-weight compared to a
+physical disk!
+
+Even on procfs, system abilities are still pretty louzy compared to what
+could be achieved on a bare-metal system or a RTOS, but hey: it's what were
+bound to use. Using this technique at least finger-point where the boundaries go.

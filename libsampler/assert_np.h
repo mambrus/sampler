@@ -25,8 +25,11 @@
  * NDEBUG compilation, but differently from assert, they have a different
  * behavior on error when NDEBUG is set.
  *
- * assert_ign - Do the stuff inside the brackets, but ignore handling the
- *              result.
+ * assert_ign - Do the stuff inside the brackets no matter how NDEBUG is
+ *              set but if NDEBUG is set, also crash. I.e. this is a safe
+ *              from miss-haps in, form of code not being executed, macro to
+ *              use instead of assert practically everywhere where speed is
+ *              preferred when NDEBUG is set.
  * assert_np  - same as assert_ign. Comparability reasons only.
  * assert_ret - Returns from function with the result. Assumes the function
  *              returns error-codes. Think twice before use.
@@ -38,6 +41,8 @@
 #ifndef assert_np_h
 #define assert_np_h
 #include <assert.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 #ifndef NDEBUG
 #  define assert_ign assert
@@ -46,12 +51,11 @@
 #  define assert_ext assert
 #else
 #include <stdio.h>
-static inline void assertfail(char *assertstr, char *filestr, int line) {
 
-		fprintf(stderr,"assert_ext: \"%s\" %s:%d\n",
-			assertstr, filestr, line);
-		exit(rc);
-}
+#ifndef ASSERT_ERROR_FILE
+#define ASSERT_ERROR_FILE stderr
+#endif
+void _assertfail(char *assertstr, char *filestr, int line);
 
 /* Do the stuff, just ignore acting on the result. */
 #  define assert_np(p) (p)
@@ -59,20 +63,21 @@ static inline void assertfail(char *assertstr, char *filestr, int line) {
 
 /* Mimic assert real behavior when NDEBUG is not set. I.e. always act. */
 
-#  define assert_ext(p) ((p) ? (void)0 : (void) assertfail( \
+#  define assert_ext(p) ((p) ? (void)0 : (void) _assertfail( \
 		#p, __FILE__, __LINE__ ) )
 
 /* Lazy error-handling. Careful using this. Assumes function invoked from
 accepts returning with code, and that the code means error */
-#  define assert_ret(p) (                                  \
-	{                                                      \
-		int rc = (p);                                      \
-                                                           \
-		rc ? (void)0 :                                     \
-		fprintf(stderr,"assert_ex %s (%s:%d)\n",           \
-			#p, __FILE__, __LINE__ );                      \
-		exit(rc);                                          \
-	}                                                      \
+#  define assert_ret(p) (                                    \
+	{                                                        \
+		int rc = (p);                                        \
+                                                             \
+		rc ? (void)0 :                                       \
+		fprintf(ASSERT_ERROR_FILE,"_assert_ex %s (%s:%d)\n", \
+			#p, __FILE__, __LINE__ );                        \
+		fflush(ASSERT_ERROR_FILE);                           \
+		return rc;                                           \
+	}                                                        \
 )
 #endif
 #endif /* assert_np_h */

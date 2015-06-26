@@ -36,7 +36,7 @@
 /* Include module common stuff */
 #include "local.h"
 
-/* Returns time of two 'struct timeval' types 
+/* Returns diff-time of two 'struct timeval' types
  * Note: Order matters. t0 means the first event, t1 the second on the same
  * time-line. If function is used for a generic diff of two times and the
  * actual time for the t1 come before t0, this function returns a negative
@@ -98,18 +98,21 @@ struct timeval tv_add(struct timeval t0, struct timeval t1) {
  * which is a disadvantage if a sample is to be compared with a kernel
  * log-entry event (except CLOCK_MONOTONIC_RAW i.e. which is a drift
  * uncompensated clock) */
-int time_now(struct timespec *tp) {
+int time_now(struct timeval *tv) {
 	int rc;
-	switch (samplermod_data.clock_type) {
+	struct timespec tp;
+
+	switch (sampler_setting.clock_type) {
 		case KERNEL_CLOCK:
 #ifdef CLOCK_MONOTONIC_RAW
-			rc=clock_gettime(CLOCK_MONOTONIC_RAW, tp);
+			rc=clock_gettime(CLOCK_MONOTONIC_RAW, &tp);
 #else
-			rc=clock_gettime(CLOCK_MONOTONIC, tp);
+#warning Target does not support CLOCK_MONOTONIC_RAW
+			rc=clock_gettime(CLOCK_MONOTONIC, &tp);
 #endif
 			break;
 		case CALENDER_CLOCK:
-			rc=clock_gettime(CLOCK_REALTIME, tp);
+			rc=clock_gettime(CLOCK_REALTIME, &tp);
 			//Alternatively clock_gettimeofday can be used but with lower
 			//resolution.
 			break;
@@ -117,6 +120,15 @@ int time_now(struct timespec *tp) {
 		default:
 			fprintf(stderr,"clock-type not supported\n");
 			rc=-1;
+	}
+	if (rc==0) {
+			/* Down-scale. Kernel log doesn't show better res than us anyway.
+			 * int-div can't be more costly than outputting 3 extra characters.
+			 * Might want higher resolution for time-keeping later though, which
+			 * should give more precise time calculation and minimize (positive)
+			 * drift when jitter-compensate. */
+			tv->tv_sec = tp.tv_sec;
+			tv->tv_usec = tp.tv_nsec/1000;
 	}
 	return rc;
 }

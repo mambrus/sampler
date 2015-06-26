@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
+#include "assert_np.h"
 #include <errno.h>
 #include <string.h>
 #include <sys/types.h>
@@ -29,23 +30,25 @@
 /* "Constructor" / "Destructor" */
 /*----------------------------------------------------------------------*/
 /* Module initializers */
-void __init mlist_init(void) {
+void __init __mlist_init(void) {
 #ifdef INITFINI_SHOW
-	fprintf(stderr,"==========_init==========\n");
+	fprintf(stderr,">>> Running module _init in ["__FILE__"]\n"
+			">>> using CTORS/DTORS mechanism ====\n");
 #endif
-	assert(!mlistmod_data.isinit);
+	assert_ext(!mlistmod_data.isinit);
 	mlistmod_data.nlists = 0,
 	mlistmod_data.mlists = NULL,
 
 	mlistmod_data.isinit=1;
 }
 
-void __fini mlist_fini(void) {
+void __fini __mlist_fini(void) {
 	struct node *tnext;   /* Needed because race could happen */
 #ifdef INITFINI_SHOW
-	fprintf(stderr,"==========_fini==========\n");
+	fprintf(stderr,">>> Running module _fini in ["__FILE__"]\n"
+			">>> using CTORS/DTORS mechanism\n");
 #endif
-	assert(mlistmod_data.isinit);
+	assert_ext(mlistmod_data.isinit);
 	/* Destroy all lists if not already done. Note: will not take care of
 	 * lists containing allocated payloads. This is not a garbage collector
 	 * */
@@ -70,7 +73,7 @@ void __fini mlist_fini(void) {
 				mlistmod_data.mlists->pl , tlist
 			);
 			rc=dstrct_mlist((handle_t)tlist);
-			assert(rc==0);
+			assert_ext(rc==0);
 		}
 
 		tnext=mlistmod_data.mlists->next;
@@ -80,4 +83,13 @@ void __fini mlist_fini(void) {
 
 	mlistmod_data.nlists = 0;
 	mlistmod_data.isinit=0;
+}
+
+
+int mlist_init() {
+	return 0;
+}
+
+int mlist_fini() {
+	return 0;
 }

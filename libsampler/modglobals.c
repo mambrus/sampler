@@ -18,34 +18,97 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+/* Module (global) data in two global structs to be easier to reference (by
+ * GDB and code). */
+
 #include "local.h"
 #include <limits.h>
 #include <stdint.h>
+#include <pthread.h>
 
-/* Module (global) data. Placed in struct to be easier to find by GDB. Must
- * be global as several c-files belonging to the same module shares this */
-struct samplermod_struct samplermod_data = {
+/* Run-time data:
+   Thread shared data (must be global) */
+struct module_sampler_data sampler_data = {
 	.isinit = 0,
 
-/* Initialize settings with default values */
+	/* Initialize fact variables with unreasonable values meant to fail if
+	 * run-time initialization fails */
 	.list = 0,
+	.tstarted = {0},
+
+	/* run diagnostics */
+	.diag_lock = PTHREAD_RWLOCK_INITIALIZER,
+	.diag = {
+		.smplID     = INT_MAX,
+		.triggID    = INT_MAX,
+		.texec      = INT_MIN,
+		.tp1        = INT_MIN,
+		.tp2        = INT_MIN,
+		.format_ary = {DIAG_NONE},
+	},
+
+	/* Initialize helper variables */
+	.nworkers = 0,
+	.ndied=0,
+	.cid_offs = 2,
+	.files_monitored = 0,
+	.fd_notify = 0,
+	.mx_stderr = PTHREAD_MUTEX_INITIALIZER,
+	.mx_master_up = PTHREAD_MUTEX_INITIALIZER,
+
+	/* Use this general rw-lock if sampler_data needs to be accessed
+	   concurrently. If use is frequent, invent a specific (like in the case
+	   below)*/
+	.sampler_data_lock = PTHREAD_RWLOCK_INITIALIZER,
+};
+
+/* Settings:
+   Need not be global ATM, but is convenient and avoids an excessive use of
+   stack references which is instead reserved for data transformation (this
+   is static after program starts) */
+struct module_sampler_setting sampler_setting = {
+	.isinit = 0,
 	.ptime = -1,
 	.clock_type = AUTODETECT,
-	.smplcntr = UINT64_MAX,
 	//.plotmode = driveGnuPlot,
 	.plotmode = feedgnuplot,
 	.delimiter = ';',
-	.verbose = 1,
+	.debuglevel = -1,
+	.verbose = 0,
 	.dolegend = 1,
-	//.dflt_worker = sinus_worker_thread,
-	.dflt_worker = poll_worker_thread,
-	//.dflt_task = sinus_data,
-	.dflt_task = poll_fdata,
-	.whatTodo = Lastval, /*Always Output something: feedgnuplot compatible
-						   and error detectable */
-
-/* Initialize helper variables */
-	.nworkers = 0,
+	.legendonly = 0,
+#ifdef SMPL_FALLBACK_VAL
+	.presetval = xstr(SMPL_FALLBACK_VAL),
+#else
 	.presetval = "0",
-	.cid_offs = 2,
+#endif
+	.realtime = 0, /* If set, policies and priorities below will be set
+					  accordingly to known-good values without the need to
+					  set them in specifically (and risk causing system
+					  melt-down by mistake)
+					*/
+
+	/* Advanced settings. Should not be encouraged to be changed by either
+	 * the end-user or coder.
+	 *
+	 * NOTE: !!!They can potentially starve out the
+	 * kernel if misused!!!
+	 *
+	 * Set to "magic" values (or at least insane) to indicated no change
+	 * intended. "No change" is the default as it requires no root permissions
+	 */
+	.policy_master    = INT_MAX,
+	.policy_workers   = INT_MAX,
+	.policy_events    = INT_MAX,
+	.prio_master      = INT_MAX,
+	.prio_workers     = INT_MAX,
+	.prio_events      = INT_MAX,
+
+	.procsubst.inherit_env = 1,
+	.procsubst.path=NULL,
+	.procsubst.env=NULL,
+	.tmpdir=NULL,
+
+	/* Use this rw-lock if sampler_setting needs to be accessed concurrently */
+	.sampler_setting_lock = PTHREAD_RWLOCK_INITIALIZER,
 };

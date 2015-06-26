@@ -20,11 +20,15 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <limits.h>
 #include <assert.h>
+#include "assert_np.h"
 #include <errno.h>
 #include <string.h>
 #include <sys/types.h>
 #include <time.h>
+#include <sampler.h>
+#include <mqueue.h>
 #include "local.h"
 
 /* Module initializers. Not much to do here for init, but fini might have
@@ -34,37 +38,69 @@
  */
 void __init __sampler_init(void) {
 #ifdef INITFINI_SHOW
-	fprintf(stderr,"==========_init  "__FILE__"==========\n");
+	fprintf(stderr,">>> Running module _init in ["__FILE__"]\n"
+			">>> using CTORS/DTORS mechanism ====\n");
 #endif
-	assert(!samplermod_data.isinit);
-	samplermod_data.smplcntr=0;
-	if (samplermod_data.clock_type == AUTODETECT) {
+	assert_ext(!sampler_data.isinit);
+	sampler_data.diag.smplID=0;
+	sampler_data.diag.triggID=0;
+	sampler_data.diag.texec=0;
+	sampler_data.diag.tp1=0;
+	sampler_data.diag.tp2=0;
+
+	/* TBD: This part is only set temporarily to test feature. This should be
+	 * replaced parsed options */
+	sampler_data.diag.format_ary[0] = EXEC_TIME;
+	sampler_data.diag.format_ary[1] = SMPL_ID;
+	sampler_data.diag.format_ary[2] = TRIG_BY_ID;
+	sampler_data.diag.format_ary[3] = PERIOD_TIME_BEGIN;
+	sampler_data.diag.format_ary[4] = PERIOD_TIME_HARVESTED;
+	/*END TBD*/
+
+	if (sampler_setting.clock_type == AUTODETECT) {
 		struct timespec tv;
 #ifdef CLOCK_MONOTONIC_RAW
 		if (clock_gettime(CLOCK_MONOTONIC_RAW, &tv) == 0)
-			samplermod_data.clock_type = KERNEL_CLOCK;
+			sampler_setting.clock_type = KERNEL_CLOCK;
 #else
-#  warning CLOCK_MONOTONIC_RAW undefined. 
+#  warning CLOCK_MONOTONIC_RAW undefined.
 #  warning Best aproximation of kernel-time will be using CLOCK_MONOTONIC
 		if (clock_gettime(CLOCK_MONOTONIC, &tv) == 0)
-			samplermod_data.clock_type = KERNEL_CLOCK;
+			sampler_setting.clock_type = KERNEL_CLOCK;
 #endif
 		else
-			samplermod_data.clock_type = CALENDER_CLOCK;
+			sampler_setting.clock_type = CALENDER_CLOCK;
 	}
-	samplermod_data.smplcntr=0;
+	assert_ext(time_now(&sampler_data.tstarted) == 0);
+	DBG_INF(4,("Unlinking any old master queue (if used). \n"));
+	mq_unlink(LOCKSTEP_Q);
 
-	samplermod_data.isinit=1;
+
+	sampler_setting.procsubst.env=calloc(1, sizeof(char**));
+	sampler_setting.procsubst.env[0]=NULL;
+	sampler_setting.procsubst.path=calloc(1, sizeof(char**));
+	sampler_setting.procsubst.path[0]=NULL;
+	sampler_setting.tmpdir=malloc(PATH_MAX);
+	strncpy(sampler_setting.tmpdir, xstr(SAMPLER_TMPDIR), PATH_MAX);
+	sampler_data.isinit=1;
+	sampler_setting.isinit=1;
 }
 
 void __fini __sampler_fini(void) {
 #ifdef INITFINI_SHOW
-	fprintf(stderr,"==========_fini "__FILE__" ==========\n");
+	fprintf(stderr,">>> Running module _fini in ["__FILE__"]\n"
+			">>> using CTORS/DTORS mechanism\n");
 #endif
-	if (!samplermod_data.isinit)
-		/* Someone allready did this in a more controlled way. Nothing to do
+	if (!sampler_data.isinit)
+		/* Someone already did this in a more controlled way. Nothing to do
 		 * here, return */
 		 return;
-	self_destruct(samplermod_data.list);
-	samplermod_data.isinit=0;
+	self_destruct(sampler_data.list);
+	DBG_INF(4,("Unlinking master queue. \n"));
+	mq_unlink(LOCKSTEP_Q);
+	free(sampler_setting.procsubst.env);
+	free(sampler_setting.procsubst.path);
+	free(sampler_setting.tmpdir);
+	sampler_data.isinit=0;
+	sampler_setting.isinit=0;
 }

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=SOMC Sampler Editor
+Exec=sampler-editor %f
+Icon=/usr/share/icons/hicolor/scalable/apps/somc-sampler.svg
+Type=Application
+Encoding=UTF-8
+Categories=GNOME;Application;Development;
+Terminal=false
+MimeType=application/x-pkcs7-certificates;

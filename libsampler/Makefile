@@ -1,31 +1,51 @@
 PHONIES=install build all clean uninstall
+.DEFAULT_GOAL=all
 
 ifneq (${MAKELEVEL},0)
 
 LOCAL_MODULE := libsampler
-LOCAL_SRC_FILESS := \
+LOCAL_SRC_FILES := \
    initfini.c \
    modglobals.c \
    sampler.c  \
    parse_setup.c \
+   prepare.c \
    runengine.c \
    time.c \
    masters.c \
    master_tasks.c \
    workers.c \
    worker_tasks.c \
-
+   eventgens.c \
+   parsers.c \
+   procsubst.c \
+   assert_np.c
 
 LOCAL_LIBS := \
     pthread \
-	m \
-	rt \
-    mlist
+    mqueue \
+    m \
+    rt \
+    mlist \
+    cap
 
-LOCAL_CFLAGS := -fPIC
-#LOCAL_CFLAGS += -DNDEBUG
-LOCAL_C_INCLUDES += ${HOME}/include
-LOCAL_LDLIBS += ${HOME}/lib
+LOCAL_CFLAGS := -fPIC -DSMPL_FALLBACK_VAL="NO_SIG"
+LOCAL_CFLAGS += -DNDEBUG
+LOCAL_CFLAGS += -DPARSER_REMOVE_EOLS
+LOCAL_CFLAGS += -DMQ_NUMBER_OF_MESSAGES=1000
+ifdef SAMPLER_TMPDIR
+    LOCAL_CFLAGS += -DSAMPLER_TMPDIR="${SAMPLER_TMPDIR}"
+endif
+LOCAL_C_INCLUDES += include
+ifeq (${LOCAL_BUILD},yes)
+    LOCAL_C_INCLUDES += ../libmlist/include
+    LOCAL_C_INCLUDES += ../libmqueue/include
+    LOCAL_LDLIBS += ../libmlist/lib
+    LOCAL_LDLIBS += ../libmqueue/lib
+else
+    LOCAL_INCLUDES_USED=no
+    LOCAL_LDLIBS += ${HOME}/lib
+endif
 LOCAL_SUBMODULES :=
 
 .PHONY: ${PHONIES} ${LOCAL_SUBMODULES}
@@ -37,74 +57,105 @@ ifeq (${WHOAMI},root)
 else
     INSTALLDIR=${HOME}
 endif
-EXHEADERS=$(shell ls include/*.h)
+ifeq (${LOCAL_INCLUDES_USED},no)
+	LOCAL_C_INCLUDES += ${INSTALLDIR}/include
+endif
+EXHEADERS_DIR=include
+EXHEADERS=$(shell ls ${EXHEADERS_DIR}/*.h | sed -e 's/^${EXHEADERS_DIR}\///')
+INSTALLED_EXHEADERS := $(patsubst %, ${INSTALLDIR}/include/%, ${EXHEADERS})
+UNINSTALLED_EXHEADERS := $(patsubst %, ${INSTALLDIR}/include/%, ${EXHEADERS})
 LOCAL_C_INCLUDES := $(addprefix -I , ${LOCAL_C_INCLUDES})
 LOCAL_LDLIBS:= $(addprefix -L, ${LOCAL_LDLIBS})
 LOCAL_LIBS:= ${LOCAL_LDLIBS} $(addprefix -l, ${LOCAL_LIBS})
 LOCAL_AR_LIBS:= $(addprefix ${LOCAL_LDLIBS}/lib, ${LOCAL_AR_LIBS})
 LOCAL_AR_LIBS:= $(addsuffix .a, ${LOCAL_AR_LIBS})
-CFLAGS += -O0 -g3 ${LOCAL_CFLAGS}
-CFLAGS += -I ./include ${LOCAL_C_INCLUDES}
+CFLAGS += -O0 -g3 ${LOCAL_CFLAGS} ${BUILD_CFLAGS}
+CFLAGS += -I ./include -I ../ ${LOCAL_C_INCLUDES}
 CLEAN_MODS := $(patsubst %, $(MAKE) clean -C %;,$(LOCAL_SUBMODULES))
 UNINST_MODS := $(patsubst %, $(MAKE) uninstall -C %;,$(LOCAL_SUBMODULES))
+FOUND_CDEPS:= $(shell ls *.d 2>/dev/null)
+RINFO := echo
+.INTERMEDIATE: ${LOCAL_SRC_FILES:.c=.d}
 
 ifdef LIB_DYNAMIC
     $(info Build will build and use it's libraries: dynamic )
     $(info To build/use static libs: unset LIB_DYNAMIC )
     LOCAL_MODULE := $(addsuffix .so, ${LOCAL_MODULE})
     MODULE_FLAGS := -shared
+    EXLIBS=$(shell ls lib/*.so)
 else
     $(info Build will build and use it's libraries: static )
     $(info To build all dynamic: export LIB_DYNAMIC='y' )
     LOCAL_MODULE := $(addsuffix .a, ${LOCAL_MODULE})
     MODULE_FLAGS := -static
+    EXLIBS=$(shell ls lib/*.a)
 endif
 
 LOCAL_MODULE := lib/${LOCAL_MODULE}
+ifeq ($(LOCAL_CLANG),)
+	CC=gcc
+else
+	CC=clang
+endif
+
+all: build
+
 build: tags $(LOCAL_MODULE)
-all: install
 
 ${LOCAL_SUBMODULES}:
-	$(MAKE) -e -k -C $@ install
+	$(MAKE) -e -k -C $@
 
 clean:
 	$(CLEAN_MODS)
 	rm -f *.o
-	rm -f $(LOCAL_MODULE)
+	rm -f lib/*.so lib/*.a
+	rm -f *.tmp
+	rm -f *.d
 	rm -f tags
 
-install: ${INSTALLDIR}/${LOCAL_MODULE} ${INSTALLDIR}/${EXHEADERS}
+install: all ${INSTALLDIR}/${LOCAL_MODULE} ${INSTALLED_EXHEADERS}
 
 uninstall:
 	$(UNINST_MODS)
 	rm -rf ${INSTALLDIR}/${LOCAL_MODULE}
-	bash -c '${INSTALLDIR}; rm ${EXHEADERS}'
+	rm -rf ${INSTALLED_EXHEADERS}
 
-${INSTALLDIR}/${LOCAL_MODULE}: build
+${INSTALLDIR}/${LOCAL_MODULE}: ${EXLIBS} ${LOCAL_MODULE}
 	mkdir -p ${INSTALLDIR}/lib
 	rm -f ${INSTALLDIR}/${LOCAL_MODULE}
 	cp $(LOCAL_MODULE) ${INSTALLDIR}/${LOCAL_MODULE}
 
-${INSTALLDIR}/${EXHEADERS}: build ${EXHEADERS}
-	mkdir -p $(shell dirname ${@})
-	rm -f ${@}
-	cp include/$(shell basename ${@}) ${@}
+${INSTALLED_EXHEADERS}: ${UNINSTALLED_EXHEADERS}
+	mkdir -p ${INSTALLDIR}/include
+	rm -f ${INSTALLDIR}/include/$(shell basename ${@})
+	cp ${EXHEADERS_DIR}/$(shell basename ${@}) ${INSTALLDIR}/include/$(shell basename ${@})
 
 tags: $(shell ls *.[ch])
 	ctags --options=.cpatterns --exclude=@.cexclude -o tags -R *
 
-
-$(LOCAL_MODULE): Makefile $(LOCAL_SRC_FILESS:c=o)
+$(LOCAL_MODULE): Makefile $(LOCAL_SRC_FILES:c=o)
 	rm -f $(LOCAL_MODULE)
 ifdef LIB_DYNAMIC
-	gcc $(CFLAGS) $(MODULE_FLAGS) $(LOCAL_SRC_FILESS:c=o) ${LOCAL_LIBS} -o ${@}
+	${CC} $(CFLAGS) $(MODULE_FLAGS) $(LOCAL_SRC_FILES:c=o) ${LOCAL_LIBS} -o ${@}
 else
-	ar rcs ${@} ${LOCAL_AR_LIBS} $(LOCAL_SRC_FILESS:c=o)
+	ar rcs ${@} ${LOCAL_AR_LIBS} $(LOCAL_SRC_FILES:c=o)
 endif
 	@echo ">>>> Build $(LOCAL_MODULE) success! <<<<"
 
-%.o: %.c Makefile
-	gcc -c $(CFLAGS) ${@:o=c} -o ${@}
+#Cancel out built-in implicit rule
+%.o: %.c
+
+%.tmp: %.c Makefile
+	${CC} -MM $(CFLAGS) ${@:tmp=c} > ${@}
+
+%.d: %.tmp
+	cat ${@:d=tmp} | sed  -E 's/$*.c/$*.c $@/' > ${@}
+
+%.o: %.d Makefile
+	${CC} -c $(CFLAGS) ${@:o=c} -o $@
+
+
+include $(FOUND_CDEPS)
 
 #========================================================================
 else #First recursion level only executes this. Used for colorized output
@@ -136,4 +187,3 @@ else
 endif
 
 endif
-

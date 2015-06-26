@@ -1,0 +1,5 @@
+Prototypes to what becomes sampler *.ini files go here
+
+Use sc.sigdef_unpack.sh / sc.sigdef_unpack.sh to convert between formats.
+Store sampler ini-files in ./testrc with the same name and with .ini as
+each directory here.

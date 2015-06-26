@@ -24,33 +24,80 @@
 #include "assert_np.h"
 #include "local.h"
 #include <limits.h>
+#include <stdlib.h>
+#include <pthread.h>
+#include <string.h>
+
+int set_thread_prio(int spolicy, int sprio) {
+		pthread_attr_t attr;
+		int policy;
+		struct sched_param param;
+		volatile int rc;
+
+		assert_ext(!
+				pthread_getschedparam(pthread_self(),
+				&policy, &param));
+		assert_ext(!
+			pthread_attr_getschedpolicy(&attr, &policy));
+
+
+		assert_ext(
+			!pthread_attr_setschedpolicy(&attr,
+				spolicy));
+		param.sched_priority = sprio;
+		assert_ext(
+			!pthread_attr_setschedparam(&attr,
+				&param));
+
+		rc=pthread_setschedparam(pthread_self(),
+				spolicy, &param);
+		if (rc != 0 ) {
+				DBG_INF(0,("pthread_setschedparam() failed "
+					"with rc=%d (%s)\n", rc, strerror(rc)));
+				return(rc);
+		};
+	return 0;
+}
 
 /* Module public functions */
-int sampler_init(const char *filename, int period) {
+int sampler(const char *filename, int period) {
 	int rc;
 	handle_t list;
 
-	rc=parse_initfile(filename, &list);
-	/*TBD: Add better error-handling*/
-	assert(rc==0);
+	sampler_setting.ptime = period;
 
-	samplermod_data.ptime = period;
-
-	rc=create_executor(list);
+	assert_ext((rc=parse_initfile(filename, &list)) == 0);
 	/*TBD: Add better error-handling*/
-	assert(rc==0);
+
+	assert_ext((rc=sampler_prep(list)) == 0);
+	/*TBD: Add better error-handling*/
+
+	/* Output legends if requested, then terminate */
+	if (sampler_setting.dolegend && sampler_setting.legendonly ) {
+		outputlegends(list);
+		goto sampler_done;
+	}
+
+	assert_ext((rc=create_executor(list)) == 0);
+	/*TBD: Add better error-handling*/
+
+sampler_done:
+	assert_ext((rc=mlist_close(list)) == 0);
 
 	//Dear gcc, shut up
-	return(0);
+	return 0;
 }
 
-int sampler_fini() {
+int sampler_exit() {
 	int rc;
-	samplermod_data.isinit = 0,
-	self_destruct(samplermod_data.list);
-	samplermod_data.ptime = UINT_MAX;
+	sampler_data.isinit = 0,
+	sampler_setting.isinit = 0,
+	self_destruct(sampler_data.list);
+	sampler_setting.ptime = UINT_MAX;
+	return 0;
 }
 
 /* Module private functions */
 int self_destruct(handle_t list) {
+	return 0;
 }
